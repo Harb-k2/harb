@@ -4,17 +4,24 @@ import type { TrpcContext } from "./_core/context";
 const db = vi.hoisted(() => ({
   createApproval: vi.fn(),
   createAuditEntry: vi.fn(),
+  createCyberAsset: vi.fn(),
+  createCyberOperation: vi.fn(),
   createDesktopAgent: vi.fn(),
   createDesktopPairing: vi.fn(),
   createRule: vi.fn(),
   createTask: vi.fn(),
   createWorkspaceFile: vi.fn(),
+  ensureCyberOwnerPolicy: vi.fn(),
   ensureHarbDefaults: vi.fn(),
   findDesktopPairing: vi.fn(),
   getDesktopAgentById: vi.fn(),
+  getCyberAsset: vi.fn(),
+  getCyberOperation: vi.fn(),
   listApprovals: vi.fn(),
   listAuditEntries: vi.fn(),
   listDesktopAgents: vi.fn(),
+  listCyberAssets: vi.fn(),
+  listCyberOperations: vi.fn(),
   listFileAccessApprovals: vi.fn(),
   listFiles: vi.fn(),
   listRules: vi.fn(),
@@ -24,6 +31,8 @@ const db = vi.hoisted(() => ({
   consumeDesktopPairing: vi.fn(),
   requestFileAccessApproval: vi.fn(),
   updateDesktopAgent: vi.fn(),
+  updateCyberOwnerPolicy: vi.fn(),
+  updateCyberOperation: vi.fn(),
   updateRule: vi.fn(),
   updateWorkspaceFile: vi.fn(),
   updateTask: vi.fn(),
@@ -61,6 +70,27 @@ describe("Harb permission workflows", () => {
     db.listRules.mockResolvedValue([]);
     db.createTask.mockResolvedValue({ id: "task-01" });
     db.createApproval.mockResolvedValue({ id: "approval-01" });
+    db.createCyberOperation.mockResolvedValue({ id: "cyber-operation-01" });
+    db.getCyberAsset.mockResolvedValue({
+      id: "cyber-asset-01",
+      name: "بيئة اختبار",
+      assetValue: "lab.example.local",
+      assetType: "web_app",
+      environment: "lab",
+      authorizationRef: "AUTH-001",
+      permittedScope: "تحليل واختبار تطبيق الويب ضمن التفويض.",
+      status: "authorized",
+      validUntil: new Date(Date.now() + 60_000),
+    });
+    db.ensureCyberOwnerPolicy.mockResolvedValue({
+      id: "cyber-policy-01",
+      ownerId: 7,
+      analysisAction: "allow",
+      passiveAction: "allow",
+      activeAction: "approval",
+      localAction: "approval",
+      requireAuthorizationAcknowledgment: true,
+    });
     db.requestFileAccessApproval.mockResolvedValue({ id: "file-approval-01", fileId: "file-01", action: "share" });
     db.resolveFileAccessApproval.mockResolvedValue({ id: "file-approval-01", fileId: "file-01", action: "share" });
   });
@@ -127,5 +157,44 @@ describe("Harb permission workflows", () => {
     expect(result).toEqual({ success: true });
     expect(db.updateDesktopAgent).toHaveBeenCalledWith(7, "agent-01", { scopes: "read_files,run_commands", status: "online" });
     expect(db.createAuditEntry).toHaveBeenCalledWith(7, expect.objectContaining({ eventType: "desktop.scopes_updated" }));
+  });
+
+  it("يطلب موافقة صريحة قبل التخطيط لاختبار سيبراني نشط", async () => {
+    const result = await appRouter.createCaller(createContext()).harb.cyber.operations.plan({
+      assetId: "cyber-asset-01",
+      operationType: "active_test",
+      requestSummary: "خطة اختبار نشط ضمن نافذة التفويض المعتمدة.",
+      authorizationAcknowledged: true,
+    });
+
+    expect(result.policy.decision).toBe("approval");
+    expect(db.createCyberOperation).toHaveBeenCalledWith(7, expect.objectContaining({ status: "awaiting_approval", decision: "approval" }));
+    expect(db.createApproval).toHaveBeenCalledWith(7, expect.objectContaining({ action: "cyber:active_test", status: "requested" }));
+    expect(db.updateCyberOperation).toHaveBeenCalledWith(7, "cyber-operation-01", expect.objectContaining({ approvalId: "approval-01" }));
+  });
+
+  it("يحظر التخطيط السيبراني على أصل خارج سجل التفويض", async () => {
+    db.getCyberAsset.mockResolvedValueOnce(undefined);
+    const result = await appRouter.createCaller(createContext()).harb.cyber.operations.plan({
+      assetId: "unknown-asset",
+      operationType: "analysis",
+      requestSummary: "تحليل أصل غير مسجل في سجل التفويض.",
+      authorizationAcknowledged: true,
+    });
+
+    expect(result.policy.decision).toBe("deny");
+    expect(db.createCyberOperation).toHaveBeenCalledWith(7, expect.objectContaining({ status: "blocked", decision: "deny" }));
+  });
+
+  it("يمنع التخطيط قبل إقرار التفويض ويسجل سبب الحظر", async () => {
+    await expect(appRouter.createCaller(createContext()).harb.cyber.operations.plan({
+      assetId: "cyber-asset-01",
+      operationType: "analysis",
+      requestSummary: "تحليل سجلات ضمن الأصل المفوض.",
+      authorizationAcknowledged: false,
+    })).rejects.toThrow("يجب إقرار امتلاك التفويض");
+
+    expect(db.createCyberOperation).not.toHaveBeenCalled();
+    expect(db.createAuditEntry).toHaveBeenCalledWith(7, expect.objectContaining({ eventType: "cyber.authorization_acknowledgment_missing", outcome: "blocked" }));
   });
 });

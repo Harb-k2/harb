@@ -9,17 +9,24 @@ import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import {
   createApproval,
   createAuditEntry,
+  createCyberAsset,
+  createCyberOperation,
   createDesktopAgent,
   createDesktopPairing,
   createRule,
   createTask,
   createWorkspaceFile,
+  ensureCyberOwnerPolicy,
   ensureHarbDefaults,
   findDesktopPairing,
   getDesktopAgentById,
+  getCyberAsset,
+  getCyberOperation,
   listApprovals,
   listAuditEntries,
   listDesktopAgents,
+  listCyberAssets,
+  listCyberOperations,
   listFileAccessApprovals,
   listFiles,
   listRules,
@@ -29,16 +36,22 @@ import {
   consumeDesktopPairing,
   requestFileAccessApproval,
   updateDesktopAgent,
+  updateCyberOwnerPolicy,
+  updateCyberOperation,
   updateWorkspaceFile,
   updateRule,
   updateTask,
 } from "./db";
 import { evaluateOwnerRules, toPolicyPrompt, type HarbRuleAction, type HarbScope, type PolicyRule } from "./harbPolicy";
+import { evaluateCyberOperation, type CyberOperationType } from "./cyberPolicy";
 import { storagePut } from "./storage";
 
 const scopeSchema = z.enum(["all", "general", "command", "file_change", "data_share"]);
 const actionSchema = z.enum(["allow", "approval", "deny"]);
 const desktopScopeSchema = z.enum(["read_files", "run_programs", "run_commands", "modify_files"]);
+const cyberAssetTypeSchema = z.enum(["domain", "ip", "web_app", "api", "host", "cloud", "repository", "local_device"]);
+const cyberEnvironmentSchema = z.enum(["production", "staging", "development", "lab"]);
+const cyberOperationTypeSchema = z.enum(["analysis", "passive_validation", "active_test", "local_execution"]);
 const hashSecret = (value: string) => createHash("sha256").update(value).digest("hex");
 const hasMatchingSecret = (provided: string, storedHash: string) => {
   const incoming = Buffer.from(hashSecret(provided), "hex");
@@ -95,6 +108,156 @@ export const appRouter = router({
     dashboard: protectedProcedure.query(({ ctx }) => getHarbSnapshot(ctx.user.id)),
     audit: router({
       list: protectedProcedure.input(z.object({ search: z.string().max(160).default("") })).query(({ ctx, input }) => listAuditEntries(ctx.user.id, input.search)),
+    }),
+    cyber: router({
+      dashboard: protectedProcedure.query(async ({ ctx }) => {
+        const [assets, operations, ownerPolicy] = await Promise.all([listCyberAssets(ctx.user.id), listCyberOperations(ctx.user.id), ensureCyberOwnerPolicy(ctx.user.id)]);
+        return { assets, operations, ownerPolicy };
+      }),
+      policy: router({
+        get: protectedProcedure.query(({ ctx }) => ensureCyberOwnerPolicy(ctx.user.id)),
+        update: protectedProcedure.input(z.object({
+          analysisAction: actionSchema.optional(),
+          passiveAction: actionSchema.optional(),
+          activeAction: actionSchema.optional(),
+          localAction: actionSchema.optional(),
+          requireAuthorizationAcknowledgment: z.boolean().optional(),
+        })).mutation(async ({ ctx, input }) => {
+          const policy = await updateCyberOwnerPolicy(ctx.user.id, input);
+          await createAuditEntry(ctx.user.id, {
+            eventType: "cyber.owner_policy_updated",
+            requestId: null,
+            outcome: "recorded",
+            summary: "تم تعديل قانون المالك السيبراني.",
+            ruleIds: "cyber-owner-law",
+            metadata: JSON.stringify(input),
+          });
+          return policy;
+        }),
+      }),
+      assets: router({
+        create: protectedProcedure.input(z.object({
+          name: z.string().trim().min(2).max(160),
+          assetValue: z.string().trim().min(2).max(512),
+          assetType: cyberAssetTypeSchema,
+          environment: cyberEnvironmentSchema,
+          authorizationRef: z.string().trim().min(3).max(320),
+          permittedScope: z.string().trim().min(10).max(4000),
+          validUntil: z.coerce.date().optional(),
+        })).mutation(async ({ ctx, input }) => {
+          const asset = await createCyberAsset(ctx.user.id, {
+            ...input,
+            status: "authorized",
+            validUntil: input.validUntil ?? null,
+          });
+          await createAuditEntry(ctx.user.id, {
+            eventType: "cyber.asset_authorized",
+            requestId: asset.id,
+            outcome: "recorded",
+            summary: `تم تسجيل الأصل «${asset.name}» ضمن نطاق تفويض سيبراني.`,
+            ruleIds: "",
+            metadata: JSON.stringify({ assetType: asset.assetType, environment: asset.environment, authorizationRef: asset.authorizationRef }),
+          });
+          return asset;
+        }),
+      }),
+      operations: router({
+        plan: protectedProcedure.input(z.object({
+          assetId: z.string().min(1),
+          operationType: cyberOperationTypeSchema,
+          requestSummary: z.string().trim().min(10).max(4000),
+          authorizationAcknowledged: z.boolean(),
+        })).mutation(async ({ ctx, input }) => {
+          const asset = await getCyberAsset(ctx.user.id, input.assetId);
+          const ownerPolicy = await ensureCyberOwnerPolicy(ctx.user.id);
+          if (ownerPolicy.requireAuthorizationAcknowledgment && !input.authorizationAcknowledged) {
+            await createAuditEntry(ctx.user.id, {
+              eventType: "cyber.authorization_acknowledgment_missing",
+              requestId: input.assetId,
+              outcome: "blocked",
+              summary: "رُفض تخطيط عملية سيبرانية لغياب إقرار التفويض الصريح.",
+              ruleIds: "cyber-owner-law",
+              metadata: JSON.stringify({ operationType: input.operationType }),
+            });
+            throw new Error("يجب إقرار امتلاك التفويض والنطاق قبل إنشاء العملية.");
+          }
+          const policy = evaluateCyberOperation(asset, input.operationType as CyberOperationType, ownerPolicy);
+          const operation = await createCyberOperation(ctx.user.id, {
+            assetId: input.assetId,
+            operationType: input.operationType,
+            riskLevel: policy.riskLevel,
+            decision: policy.decision,
+            status: policy.decision === "allow" ? "planned" : policy.decision === "approval" ? "awaiting_approval" : "blocked",
+            requestSummary: input.requestSummary,
+            decisionReason: policy.reason,
+            plan: policy.plan,
+            approvalId: null,
+            authorizationAcknowledgedAt: new Date(),
+            resultSummary: null,
+            completedAt: null,
+          });
+          if (policy.decision === "approval") {
+            const approval = await createApproval(ctx.user.id, {
+              taskId: operation.id,
+              action: `cyber:${input.operationType}`,
+              riskLevel: "high",
+              status: "requested",
+              summary: `${asset?.name ?? "أصل غير معروف"}: ${input.requestSummary}`,
+              expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+              resolvedAt: null,
+            });
+            await updateCyberOperation(ctx.user.id, operation.id, { approvalId: approval.id });
+            await createAuditEntry(ctx.user.id, {
+              eventType: "cyber.operation_pending_approval",
+              requestId: operation.id,
+              outcome: "approval_requested",
+              summary: policy.reason,
+              ruleIds: "cyber-owner-law",
+              metadata: JSON.stringify({ assetId: input.assetId, approvalId: approval.id, operationType: input.operationType }),
+            });
+            return { operation: { ...operation, approvalId: approval.id }, policy, approval };
+          }
+          await createAuditEntry(ctx.user.id, {
+            eventType: "cyber.operation_planned",
+            requestId: operation.id,
+            outcome: policy.decision === "allow" ? "allowed" : "blocked",
+            summary: policy.reason,
+            ruleIds: "cyber-owner-law",
+            metadata: JSON.stringify({ assetId: input.assetId, operationType: input.operationType }),
+          });
+          return { operation, policy };
+        }),
+        resolveApproval: protectedProcedure.input(z.object({ operationId: z.string().min(1), status: z.enum(["approved", "rejected"]) })).mutation(async ({ ctx, input }) => {
+          const operation = await getCyberOperation(ctx.user.id, input.operationId);
+          if (!operation?.approvalId) throw new Error("لا توجد موافقة نشطة لهذه العملية السيبرانية.");
+          await resolveApproval(ctx.user.id, operation.approvalId, input.status);
+          await updateCyberOperation(ctx.user.id, operation.id, { status: input.status === "approved" ? "approved" : "blocked" });
+          await createAuditEntry(ctx.user.id, {
+            eventType: "cyber.operation_approval_resolved",
+            requestId: operation.id,
+            outcome: input.status,
+            summary: input.status === "approved" ? "اعتمد المالك خطة عملية سيبرانية؛ تظل بانتظار منفذ مصرح ومقيّد." : "رفض المالك خطة عملية سيبرانية.",
+            ruleIds: "cyber-owner-law",
+            metadata: JSON.stringify({ approvalId: operation.approvalId }),
+          });
+          return { success: true };
+        }),
+        complete: protectedProcedure.input(z.object({ operationId: z.string().min(1), resultSummary: z.string().trim().min(10).max(4000) })).mutation(async ({ ctx, input }) => {
+          const operation = await getCyberOperation(ctx.user.id, input.operationId);
+          if (!operation) throw new Error("العملية السيبرانية غير موجودة.");
+          if (operation.status !== "approved" && operation.status !== "planned") throw new Error("لا يمكن تسجيل نتيجة لعملية غير معتمدة أو محظورة.");
+          await updateCyberOperation(ctx.user.id, operation.id, { status: "completed", completedAt: new Date(), resultSummary: input.resultSummary });
+          await createAuditEntry(ctx.user.id, {
+            eventType: "cyber.operation_result_recorded",
+            requestId: operation.id,
+            outcome: "completed",
+            summary: "تم تسجيل نتيجة عملية سيبرانية منفذة ضمن التفويض.",
+            ruleIds: "cyber-owner-law",
+            metadata: JSON.stringify({ operationType: operation.operationType }),
+          });
+          return { success: true };
+        }),
+      }),
     }),
     rules: router({
       create: protectedProcedure.input(ruleInput).mutation(async ({ ctx, input }) => {

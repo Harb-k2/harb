@@ -77,6 +77,50 @@ export const fileAccessApprovals = mysqlTable("file_access_approvals", {
   resolvedAt: timestamp("resolvedAt"),
 });
 
+export const cyberAssets = mysqlTable("cyber_assets", {
+  id: varchar("id", { length: 48 }).primaryKey(),
+  ownerId: int("ownerId").notNull(),
+  name: varchar("name", { length: 160 }).notNull(),
+  assetValue: varchar("assetValue", { length: 512 }).notNull(),
+  assetType: mysqlEnum("assetType", ["domain", "ip", "web_app", "api", "host", "cloud", "repository", "local_device"]).notNull(),
+  environment: mysqlEnum("environment", ["production", "staging", "development", "lab"]).default("lab").notNull(),
+  authorizationRef: varchar("authorizationRef", { length: 320 }).notNull(),
+  permittedScope: text("permittedScope").notNull(),
+  status: mysqlEnum("status", ["authorized", "suspended", "expired"]).default("authorized").notNull(),
+  validUntil: timestamp("validUntil"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const cyberOwnerPolicies = mysqlTable("cyber_owner_policies", {
+  id: varchar("id", { length: 48 }).primaryKey(),
+  ownerId: int("ownerId").notNull().unique(),
+  analysisAction: mysqlEnum("analysisAction", ["allow", "approval", "deny"]).default("allow").notNull(),
+  passiveAction: mysqlEnum("passiveAction", ["allow", "approval", "deny"]).default("allow").notNull(),
+  activeAction: mysqlEnum("activeAction", ["allow", "approval", "deny"]).default("approval").notNull(),
+  localAction: mysqlEnum("localAction", ["allow", "approval", "deny"]).default("approval").notNull(),
+  requireAuthorizationAcknowledgment: boolean("requireAuthorizationAcknowledgment").default(true).notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const cyberOperations = mysqlTable("cyber_operations", {
+  id: varchar("id", { length: 48 }).primaryKey(),
+  ownerId: int("ownerId").notNull(),
+  assetId: varchar("assetId", { length: 48 }).notNull(),
+  operationType: mysqlEnum("operationType", ["analysis", "passive_validation", "active_test", "local_execution"]).notNull(),
+  riskLevel: mysqlEnum("riskLevel", ["low", "medium", "high"]).notNull(),
+  decision: mysqlEnum("decision", ["allow", "approval", "deny"]).notNull(),
+  status: mysqlEnum("status", ["planned", "awaiting_approval", "blocked", "approved", "completed", "failed"]).notNull(),
+  requestSummary: text("requestSummary").notNull(),
+  decisionReason: text("decisionReason").notNull(),
+  plan: text("plan").notNull(),
+  approvalId: varchar("approvalId", { length: 48 }),
+  authorizationAcknowledgedAt: timestamp("authorizationAcknowledgedAt"),
+  resultSummary: text("resultSummary"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  completedAt: timestamp("completedAt"),
+});
+
 export const auditEntries = mysqlTable("audit_entries", {
   id: varchar("id", { length: 48 }).primaryKey(),
   ownerId: int("ownerId").notNull(),
@@ -117,6 +161,9 @@ export type HarbTask = typeof harbTasks.$inferSelect;
 export type Approval = typeof approvals.$inferSelect;
 export type WorkspaceFile = typeof workspaceFiles.$inferSelect;
 export type FileAccessApproval = typeof fileAccessApprovals.$inferSelect;
+export type CyberAsset = typeof cyberAssets.$inferSelect;
+export type CyberOwnerPolicy = typeof cyberOwnerPolicies.$inferSelect;
+export type CyberOperation = typeof cyberOperations.$inferSelect;
 export type AuditEntry = typeof auditEntries.$inferSelect;
 export type DesktopAgent = typeof desktopAgents.$inferSelect;
 export type DesktopPairing = typeof desktopPairings.$inferSelect;

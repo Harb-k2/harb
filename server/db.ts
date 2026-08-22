@@ -4,6 +4,9 @@ import { nanoid } from "nanoid";
 import {
   approvals,
   auditEntries,
+  cyberAssets,
+  cyberOwnerPolicies,
+  cyberOperations,
   desktopAgents,
   desktopPairings,
   fileAccessApprovals,
@@ -214,6 +217,80 @@ export async function createAuditEntry(ownerId: number, values: Omit<typeof audi
   const db = await getDb();
   if (!db) return;
   await db.insert(auditEntries).values({ id: nanoid(), ownerId, ...values });
+}
+
+export async function listCyberAssets(ownerId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(cyberAssets).where(eq(cyberAssets.ownerId, ownerId)).orderBy(desc(cyberAssets.createdAt));
+}
+
+export async function ensureCyberOwnerPolicy(ownerId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  const existing = await db.select().from(cyberOwnerPolicies).where(eq(cyberOwnerPolicies.ownerId, ownerId)).limit(1);
+  if (existing[0]) return existing[0];
+  const policy = {
+    id: nanoid(),
+    ownerId,
+    analysisAction: "allow" as const,
+    passiveAction: "allow" as const,
+    activeAction: "approval" as const,
+    localAction: "approval" as const,
+    requireAuthorizationAcknowledgment: true,
+  };
+  await db.insert(cyberOwnerPolicies).values(policy);
+  return policy;
+}
+
+export async function updateCyberOwnerPolicy(ownerId: number, values: Partial<Pick<typeof cyberOwnerPolicies.$inferInsert, "analysisAction" | "passiveAction" | "activeAction" | "localAction" | "requireAuthorizationAcknowledgment">>) {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  await ensureCyberOwnerPolicy(ownerId);
+  await db.update(cyberOwnerPolicies).set(values).where(eq(cyberOwnerPolicies.ownerId, ownerId));
+  return ensureCyberOwnerPolicy(ownerId);
+}
+
+export async function getCyberAsset(ownerId: number, id: string) {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  const result = await db.select().from(cyberAssets).where(and(eq(cyberAssets.ownerId, ownerId), eq(cyberAssets.id, id))).limit(1);
+  return result[0];
+}
+
+export async function createCyberAsset(ownerId: number, values: Omit<typeof cyberAssets.$inferInsert, "id" | "ownerId" | "createdAt" | "updatedAt">) {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  const record = { id: nanoid(), ownerId, ...values };
+  await db.insert(cyberAssets).values(record);
+  return record;
+}
+
+export async function listCyberOperations(ownerId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(cyberOperations).where(eq(cyberOperations.ownerId, ownerId)).orderBy(desc(cyberOperations.createdAt)).limit(50);
+}
+
+export async function createCyberOperation(ownerId: number, values: Omit<typeof cyberOperations.$inferInsert, "id" | "ownerId" | "createdAt">) {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  const record = { id: nanoid(), ownerId, ...values };
+  await db.insert(cyberOperations).values(record);
+  return record;
+}
+
+export async function getCyberOperation(ownerId: number, id: string) {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  const result = await db.select().from(cyberOperations).where(and(eq(cyberOperations.ownerId, ownerId), eq(cyberOperations.id, id))).limit(1);
+  return result[0];
+}
+
+export async function updateCyberOperation(ownerId: number, id: string, values: Partial<Pick<typeof cyberOperations.$inferInsert, "status" | "approvalId" | "completedAt" | "resultSummary">>) {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  await db.update(cyberOperations).set(values).where(and(eq(cyberOperations.ownerId, ownerId), eq(cyberOperations.id, id)));
 }
 
 export async function listAuditEntries(ownerId: number, search = "") {
