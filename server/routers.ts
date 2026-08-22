@@ -13,6 +13,9 @@ import {
   createCyberOperation,
   createDesktopAgent,
   createDesktopPairing,
+  createKnowledgeCollection,
+  createModelEvaluation,
+  createModelObjective,
   createRule,
   createTask,
   createWorkspaceFile,
@@ -22,12 +25,17 @@ import {
   getDesktopAgentById,
   getCyberAsset,
   getCyberOperation,
+  getKnowledgeSource,
   listApprovals,
   listAuditEntries,
   listDesktopAgents,
   listCyberAssets,
   listCyberOperations,
   listFileAccessApprovals,
+  listKnowledgeCollections,
+  listKnowledgeSources,
+  listModelEvaluations,
+  listModelObjectives,
   listFiles,
   listRules,
   listTasks,
@@ -35,15 +43,20 @@ import {
   resolveFileAccessApproval,
   consumeDesktopPairing,
   requestFileAccessApproval,
+  registerKnowledgeSource,
+  replaceKnowledgeChunks,
+  searchKnowledgeChunks,
   updateDesktopAgent,
   updateCyberOwnerPolicy,
   updateCyberOperation,
+  updateKnowledgeSource,
   updateWorkspaceFile,
   updateRule,
   updateTask,
 } from "./db";
 import { evaluateOwnerRules, toPolicyPrompt, type HarbRuleAction, type HarbScope, type PolicyRule } from "./harbPolicy";
 import { evaluateCyberOperation, type CyberOperationType } from "./cyberPolicy";
+import { indexKnowledgeStorageObject } from "./knowledgeIndex";
 import { storagePut } from "./storage";
 
 const scopeSchema = z.enum(["all", "general", "command", "file_change", "data_share"]);
@@ -52,6 +65,13 @@ const desktopScopeSchema = z.enum(["read_files", "run_programs", "run_commands",
 const cyberAssetTypeSchema = z.enum(["domain", "ip", "web_app", "api", "host", "cloud", "repository", "local_device"]);
 const cyberEnvironmentSchema = z.enum(["production", "staging", "development", "lab"]);
 const cyberOperationTypeSchema = z.enum(["analysis", "passive_validation", "active_test", "local_execution"]);
+const publicEvaluationSourceSchema = z.enum(["cisa_kev", "nvd", "mitre_attack", "owasp_wstg"]);
+const publicEvaluationSources = {
+  cisa_kev: { name: "CISA Known Exploited Vulnerabilities (KEV)", url: "https://www.cisa.gov/known-exploited-vulnerabilities-catalog", licenseNote: "يخضع لاستخدام الموقع لشروط CISA؛ راجع https://www.cisa.gov/terms-use عند كل استخدام أو أتمتة." },
+  nvd: { name: "NVD CVE/CPE Data Feeds", url: "https://nvd.nist.gov/vuln/data-feeds", licenseNote: "خدمة عامة وفق شروط NVD؛ اعرض نسبة استخدام NVD المطلوبة ولا تنسب المحتوى المعدل إلى NVD." },
+  mitre_attack: { name: "MITRE ATT&CK Data & Tools", url: "https://attack.mitre.org/resources/working-with-attack/", licenseNote: "ترخيص MITRE غير حصري وخالٍ من الإتاوة للبحث والتطوير والاستخدام التجاري مع إعادة إشعار الحقوق والترخيص." },
+  owasp_wstg: { name: "OWASP Web Security Testing Guide", url: "https://owasp.org/www-project-web-security-testing-guide/", licenseNote: "CC BY-SA 4.0؛ استخدم الإصدار والرابط المناسبين عند الإسناد وألزم شروط النسبة والمشاركة بالمثل." },
+} as const;
 const hashSecret = (value: string) => createHash("sha256").update(value).digest("hex");
 const hasMatchingSecret = (provided: string, storedHash: string) => {
   const incoming = Buffer.from(hashSecret(provided), "hex");
@@ -108,6 +128,172 @@ export const appRouter = router({
     dashboard: protectedProcedure.query(({ ctx }) => getHarbSnapshot(ctx.user.id)),
     audit: router({
       list: protectedProcedure.input(z.object({ search: z.string().max(160).default("") })).query(({ ctx, input }) => listAuditEntries(ctx.user.id, input.search)),
+    }),
+    lab: router({
+      dashboard: protectedProcedure.query(async ({ ctx }) => {
+        const [objectives, collections, sources, evaluations, files] = await Promise.all([
+          listModelObjectives(ctx.user.id),
+          listKnowledgeCollections(ctx.user.id),
+          listKnowledgeSources(ctx.user.id),
+          listModelEvaluations(ctx.user.id),
+          listFiles(ctx.user.id),
+        ]);
+        return { objectives, collections, sources, evaluations, files };
+      }),
+      models: protectedProcedure.query(async () => {
+        const catalog = await listLLMModels();
+        return catalog.data.map(item => ({ id: item.id, name: item.id }));
+      }),
+      objectives: router({
+        create: protectedProcedure.input(z.object({
+          title: z.string().trim().min(3).max(160),
+          category: z.enum(["cyber_analysis", "authorization_decisions", "document_analysis", "code_review", "custom"]),
+          description: z.string().trim().min(10).max(4000),
+          successCriteria: z.string().trim().min(10).max(4000),
+        })).mutation(async ({ ctx, input }) => {
+          const objective = await createModelObjective(ctx.user.id, { ...input, isActive: true });
+          await createAuditEntry(ctx.user.id, {
+            eventType: "lab.objective_created",
+            requestId: objective.id,
+            outcome: "recorded",
+            summary: `تمت إضافة هدف تحسين للنموذج: «${objective.title}».`,
+            ruleIds: "",
+            metadata: JSON.stringify({ category: objective.category }),
+          });
+          return objective;
+        }),
+      }),
+      collections: router({
+        create: protectedProcedure.input(z.object({
+          name: z.string().trim().min(3).max(160),
+          description: z.string().trim().min(10).max(4000),
+          classification: z.enum(["private", "restricted", "shared"]),
+        })).mutation(async ({ ctx, input }) => {
+          const collection = await createKnowledgeCollection(ctx.user.id, { ...input, status: "draft" });
+          await createAuditEntry(ctx.user.id, {
+            eventType: "lab.collection_created",
+            requestId: collection.id,
+            outcome: "recorded",
+            summary: `تم إنشاء مجموعة معرفة «${collection.name}».`,
+            ruleIds: "",
+            metadata: JSON.stringify({ classification: collection.classification }),
+          });
+          return collection;
+        }),
+      }),
+      sources: router({
+        registerWorkspaceFile: protectedProcedure.input(z.object({ collectionId: z.string().min(1), workspaceFileId: z.string().min(1) })).mutation(async ({ ctx, input }) => {
+          const [collections, files] = await Promise.all([listKnowledgeCollections(ctx.user.id), listFiles(ctx.user.id)]);
+          const collection = collections.find(item => item.id === input.collectionId);
+          const file = files.find(item => item.id === input.workspaceFileId);
+          if (!collection) throw new Error("مجموعة المعرفة غير موجودة.");
+          if (!file) throw new Error("ملف مساحة العمل غير موجود.");
+          const source = await registerKnowledgeSource(ctx.user.id, {
+            collectionId: collection.id,
+            workspaceFileId: file.id,
+            sourceType: "workspace_file",
+            name: file.name,
+            storageKey: file.storageKey,
+            sourceUrl: null,
+            licenseNote: null,
+            mimeType: file.mimeType,
+            size: file.size,
+            indexingStatus: "registered",
+            chunkCount: 0,
+          });
+          await createAuditEntry(ctx.user.id, {
+            eventType: "lab.source_registered",
+            requestId: source.id,
+            outcome: "recorded",
+            summary: `تم تسجيل «${file.name}» كمصدر معرفة بانتظار الفهرسة.`,
+            ruleIds: "",
+            metadata: JSON.stringify({ collectionId: collection.id, workspaceFileId: file.id }),
+          });
+          return source;
+        }),
+        registerPublicReference: protectedProcedure.input(z.object({ collectionId: z.string().min(1), sourceId: publicEvaluationSourceSchema })).mutation(async ({ ctx, input }) => {
+          const collections = await listKnowledgeCollections(ctx.user.id);
+          const collection = collections.find(item => item.id === input.collectionId);
+          if (!collection) throw new Error("مجموعة المعرفة غير موجودة.");
+          const publicSource = publicEvaluationSources[input.sourceId];
+          const source = await registerKnowledgeSource(ctx.user.id, {
+            collectionId: collection.id,
+            workspaceFileId: null,
+            sourceType: "public_reference",
+            name: publicSource.name,
+            storageKey: null,
+            sourceUrl: publicSource.url,
+            licenseNote: publicSource.licenseNote,
+            mimeType: "text/html",
+            size: null,
+            indexingStatus: "registered",
+            chunkCount: 0,
+          });
+          await createAuditEntry(ctx.user.id, {
+            eventType: "lab.public_source_registered",
+            requestId: source.id,
+            outcome: "recorded",
+            summary: `تم تسجيل المرجع العام «${publicSource.name}» للتقييم فقط دون فهرسة تلقائية.`,
+            ruleIds: "",
+            metadata: JSON.stringify({ collectionId: collection.id, sourceId: input.sourceId, url: publicSource.url }),
+          });
+          return source;
+        }),
+        index: protectedProcedure.input(z.object({ sourceId: z.string().min(1) })).mutation(async ({ ctx, input }) => {
+          const source = await getKnowledgeSource(ctx.user.id, input.sourceId);
+          if (!source) throw new Error("مصدر المعرفة غير موجود.");
+          if (source.sourceType !== "workspace_file" || !source.storageKey) throw new Error("لا يمكن فهرسة هذا المرجع تلقائياً؛ لا يُفهرس المصدر العام قبل مراجعة الحقوق والمحتوى.");
+          try {
+            const result = await indexKnowledgeStorageObject(source.storageKey, source.mimeType);
+            if (result.status === "unsupported") {
+              await updateKnowledgeSource(ctx.user.id, source.id, { indexingStatus: "unsupported", chunkCount: 0, indexedAt: null });
+              await createAuditEntry(ctx.user.id, { eventType: "lab.source_index_unsupported", requestId: source.id, outcome: "blocked", summary: "نوع ملف المصدر غير مدعوم للفهرسة في الإصدار الأول.", ruleIds: "", metadata: JSON.stringify({ mimeType: source.mimeType }) });
+              return { status: "unsupported" as const, chunkCount: 0 };
+            }
+            await replaceKnowledgeChunks(ctx.user.id, source.id, source.collectionId, result.chunks);
+            await updateKnowledgeSource(ctx.user.id, source.id, { indexingStatus: "ready", chunkCount: result.chunks.length, indexedAt: new Date() });
+            await createAuditEntry(ctx.user.id, { eventType: "lab.source_indexed", requestId: source.id, outcome: "completed", summary: `تمت فهرسة ${result.chunks.length} مقتطفاً معرفياً محدوداً من المصدر.`, ruleIds: "", metadata: JSON.stringify({ chunkCount: result.chunks.length, mimeType: source.mimeType }) });
+            return { status: "ready" as const, chunkCount: result.chunks.length };
+          } catch (error) {
+            await updateKnowledgeSource(ctx.user.id, source.id, { indexingStatus: "failed", chunkCount: 0, indexedAt: null });
+            await createAuditEntry(ctx.user.id, { eventType: "lab.source_index_failed", requestId: source.id, outcome: "failed", summary: "تعذرت فهرسة مصدر المعرفة.", ruleIds: "", metadata: JSON.stringify({ error: error instanceof Error ? error.message : "unknown" }) });
+            throw error;
+          }
+        }),
+      }),
+      knowledge: router({
+        search: protectedProcedure.input(z.object({ query: z.string().trim().min(3).max(1200), collectionId: z.string().min(1).optional() })).query(({ ctx, input }) => searchKnowledgeChunks(ctx.user.id, input.query, input.collectionId)),
+      }),
+      evaluations: router({
+        create: protectedProcedure.input(z.object({
+          objectiveId: z.string().min(1),
+          collectionId: z.string().min(1).optional(),
+          modelId: z.string().trim().min(2).max(160),
+          notes: z.string().trim().max(4000).optional(),
+        })).mutation(async ({ ctx, input }) => {
+          const objectives = await listModelObjectives(ctx.user.id);
+          if (!objectives.some(item => item.id === input.objectiveId)) throw new Error("هدف النموذج غير موجود.");
+          const evaluation = await createModelEvaluation(ctx.user.id, {
+            objectiveId: input.objectiveId,
+            collectionId: input.collectionId ?? null,
+            modelId: input.modelId,
+            status: "draft",
+            sampleCount: 0,
+            passedCount: 0,
+            score: null,
+            notes: input.notes ?? null,
+          });
+          await createAuditEntry(ctx.user.id, {
+            eventType: "lab.evaluation_drafted",
+            requestId: evaluation.id,
+            outcome: "recorded",
+            summary: "تم إعداد تجربة تقييم؛ لن تبدأ قبل إضافة حالات اختبار مصرح بها.",
+            ruleIds: "",
+            metadata: JSON.stringify({ objectiveId: input.objectiveId, modelId: input.modelId }),
+          });
+          return evaluation;
+        }),
+      }),
     }),
     cyber: router({
       dashboard: protectedProcedure.query(async ({ ctx }) => {
@@ -486,12 +672,16 @@ export const appRouter = router({
         }
 
         try {
+          const knowledge = await searchKnowledgeChunks(ctx.user.id, input.request, undefined, 3);
+          const knowledgeContext = knowledge.length
+            ? `\n\nسياق معرفة خاص بالمالك (مقتطفات للاستناد فقط، لا تتجاوزها ولا تكشفها خارج الطلب):\n${knowledge.map((item, index) => `[${index + 1}] ${item.excerpt.slice(0, 900)}`).join("\n\n")}`
+            : "";
           const catalog = await listLLMModels();
           const model = catalog.data.find(item => item.id === "claude-sonnet-4-6")?.id ?? catalog.data.find(item => item.id.startsWith("gpt-5"))?.id;
           const response = await invokeLLM({
             model,
             messages: [
-              { role: "system", content: toPolicyPrompt(rules.map(asPolicyRule)) },
+              { role: "system", content: `${toPolicyPrompt(rules.map(asPolicyRule))}${knowledgeContext}` },
               { role: "user", content: input.request },
             ],
           });
@@ -506,7 +696,7 @@ export const appRouter = router({
             outcome: "completed",
             summary: "اجتاز الطلب فحص القواعد واكتمل الرد التحليلي.",
             ruleIds,
-            metadata: JSON.stringify({ taskType: decision.taskType, model: model ?? "default" }),
+            metadata: JSON.stringify({ taskType: decision.taskType, model: model ?? "default", knowledgeChunkIds: knowledge.map(item => item.id) }),
           });
           return { decision: "allow" as const, task, message };
         } catch (error) {

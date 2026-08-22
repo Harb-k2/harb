@@ -12,6 +12,11 @@ import {
   fileAccessApprovals,
   harbTasks,
   InsertUser,
+  knowledgeCollections,
+  knowledgeChunks,
+  knowledgeSources,
+  modelEvaluations,
+  modelObjectives,
   ownerRules,
   OwnerRule,
   users,
@@ -291,6 +296,93 @@ export async function updateCyberOperation(ownerId: number, id: string, values: 
   const db = await getDb();
   if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
   await db.update(cyberOperations).set(values).where(and(eq(cyberOperations.ownerId, ownerId), eq(cyberOperations.id, id)));
+}
+
+export async function listModelObjectives(ownerId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(modelObjectives).where(eq(modelObjectives.ownerId, ownerId)).orderBy(desc(modelObjectives.createdAt));
+}
+
+export async function createModelObjective(ownerId: number, values: Omit<typeof modelObjectives.$inferInsert, "id" | "ownerId" | "createdAt" | "updatedAt">) {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  const record = { id: nanoid(), ownerId, ...values };
+  await db.insert(modelObjectives).values(record);
+  return record;
+}
+
+export async function listKnowledgeCollections(ownerId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(knowledgeCollections).where(eq(knowledgeCollections.ownerId, ownerId)).orderBy(desc(knowledgeCollections.createdAt));
+}
+
+export async function createKnowledgeCollection(ownerId: number, values: Omit<typeof knowledgeCollections.$inferInsert, "id" | "ownerId" | "createdAt" | "updatedAt">) {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  const record = { id: nanoid(), ownerId, ...values };
+  await db.insert(knowledgeCollections).values(record);
+  return record;
+}
+
+export async function listKnowledgeSources(ownerId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(knowledgeSources).where(eq(knowledgeSources.ownerId, ownerId)).orderBy(desc(knowledgeSources.createdAt));
+}
+
+export async function registerKnowledgeSource(ownerId: number, values: Omit<typeof knowledgeSources.$inferInsert, "id" | "ownerId" | "createdAt" | "indexedAt">) {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  const record = { id: nanoid(), ownerId, ...values };
+  await db.insert(knowledgeSources).values(record);
+  return record;
+}
+
+export async function getKnowledgeSource(ownerId: number, id: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const records = await db.select().from(knowledgeSources).where(and(eq(knowledgeSources.ownerId, ownerId), eq(knowledgeSources.id, id))).limit(1);
+  return records[0];
+}
+
+export async function updateKnowledgeSource(ownerId: number, id: string, values: Partial<Pick<typeof knowledgeSources.$inferInsert, "indexingStatus" | "chunkCount" | "indexedAt">>) {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  await db.update(knowledgeSources).set(values).where(and(eq(knowledgeSources.ownerId, ownerId), eq(knowledgeSources.id, id)));
+}
+
+export async function replaceKnowledgeChunks(ownerId: number, sourceId: string, collectionId: string, chunks: Array<{ excerpt: string; contentHash: string }>) {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  await db.delete(knowledgeChunks).where(and(eq(knowledgeChunks.ownerId, ownerId), eq(knowledgeChunks.sourceId, sourceId)));
+  if (!chunks.length) return;
+  await db.insert(knowledgeChunks).values(chunks.map((chunk, chunkIndex) => ({ id: nanoid(), ownerId, sourceId, collectionId, chunkIndex, excerpt: chunk.excerpt, contentHash: chunk.contentHash })));
+}
+
+export async function searchKnowledgeChunks(ownerId: number, query: string, collectionId?: string, limit = 4) {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = collectionId
+    ? await db.select().from(knowledgeChunks).where(and(eq(knowledgeChunks.ownerId, ownerId), eq(knowledgeChunks.collectionId, collectionId))).limit(500)
+    : await db.select().from(knowledgeChunks).where(eq(knowledgeChunks.ownerId, ownerId)).limit(500);
+  const tokens = query.toLowerCase().split(/[^\w\u0600-\u06FF-]+/).filter(token => token.length >= 3).slice(0, 20);
+  return rows.map(row => ({ ...row, score: tokens.reduce((score, token) => score + (row.excerpt.toLowerCase().includes(token) ? 1 : 0), 0) })).filter(row => row.score > 0).sort((a, b) => b.score - a.score).slice(0, limit);
+}
+
+export async function listModelEvaluations(ownerId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(modelEvaluations).where(eq(modelEvaluations.ownerId, ownerId)).orderBy(desc(modelEvaluations.createdAt));
+}
+
+export async function createModelEvaluation(ownerId: number, values: Omit<typeof modelEvaluations.$inferInsert, "id" | "ownerId" | "createdAt" | "completedAt">) {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  const record = { id: nanoid(), ownerId, ...values };
+  await db.insert(modelEvaluations).values(record);
+  return record;
 }
 
 export async function listAuditEntries(ownerId: number, search = "") {

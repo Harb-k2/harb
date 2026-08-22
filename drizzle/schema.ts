@@ -121,6 +121,73 @@ export const cyberOperations = mysqlTable("cyber_operations", {
   completedAt: timestamp("completedAt"),
 });
 
+export const modelObjectives = mysqlTable("model_objectives", {
+  id: varchar("id", { length: 48 }).primaryKey(),
+  ownerId: int("ownerId").notNull(),
+  title: varchar("title", { length: 160 }).notNull(),
+  category: mysqlEnum("category", ["cyber_analysis", "authorization_decisions", "document_analysis", "code_review", "custom"]).notNull(),
+  description: text("description").notNull(),
+  successCriteria: text("successCriteria").notNull(),
+  isActive: boolean("isActive").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const knowledgeCollections = mysqlTable("knowledge_collections", {
+  id: varchar("id", { length: 48 }).primaryKey(),
+  ownerId: int("ownerId").notNull(),
+  name: varchar("name", { length: 160 }).notNull(),
+  description: text("description").notNull(),
+  classification: mysqlEnum("classification", ["private", "restricted", "shared"]).default("private").notNull(),
+  status: mysqlEnum("status", ["draft", "ready", "archived"]).default("draft").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const knowledgeSources = mysqlTable("knowledge_sources", {
+  id: varchar("id", { length: 48 }).primaryKey(),
+  ownerId: int("ownerId").notNull(),
+  collectionId: varchar("collectionId", { length: 48 }).notNull(),
+  workspaceFileId: varchar("workspaceFileId", { length: 48 }),
+  sourceType: mysqlEnum("sourceType", ["workspace_file", "public_reference"]).default("workspace_file").notNull(),
+  name: varchar("name", { length: 320 }).notNull(),
+  storageKey: varchar("storageKey", { length: 700 }),
+  sourceUrl: varchar("sourceUrl", { length: 1024 }),
+  licenseNote: varchar("licenseNote", { length: 1000 }),
+  mimeType: varchar("mimeType", { length: 160 }),
+  size: int("size"),
+  indexingStatus: mysqlEnum("indexingStatus", ["registered", "ready", "unsupported", "failed"]).default("registered").notNull(),
+  chunkCount: int("chunkCount").default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  indexedAt: timestamp("indexedAt"),
+});
+
+export const knowledgeChunks = mysqlTable("knowledge_chunks", {
+  id: varchar("id", { length: 48 }).primaryKey(),
+  ownerId: int("ownerId").notNull(),
+  collectionId: varchar("collectionId", { length: 48 }).notNull(),
+  sourceId: varchar("sourceId", { length: 48 }).notNull(),
+  chunkIndex: int("chunkIndex").notNull(),
+  excerpt: text("excerpt").notNull(),
+  contentHash: varchar("contentHash", { length: 64 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const modelEvaluations = mysqlTable("model_evaluations", {
+  id: varchar("id", { length: 48 }).primaryKey(),
+  ownerId: int("ownerId").notNull(),
+  objectiveId: varchar("objectiveId", { length: 48 }).notNull(),
+  collectionId: varchar("collectionId", { length: 48 }),
+  modelId: varchar("modelId", { length: 160 }).notNull(),
+  status: mysqlEnum("status", ["draft", "ready", "running", "completed", "failed"]).default("draft").notNull(),
+  sampleCount: int("sampleCount").default(0).notNull(),
+  passedCount: int("passedCount").default(0).notNull(),
+  score: int("score"),
+  notes: text("notes"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  completedAt: timestamp("completedAt"),
+});
+
 export const auditEntries = mysqlTable("audit_entries", {
   id: varchar("id", { length: 48 }).primaryKey(),
   ownerId: int("ownerId").notNull(),
@@ -164,6 +231,11 @@ export type FileAccessApproval = typeof fileAccessApprovals.$inferSelect;
 export type CyberAsset = typeof cyberAssets.$inferSelect;
 export type CyberOwnerPolicy = typeof cyberOwnerPolicies.$inferSelect;
 export type CyberOperation = typeof cyberOperations.$inferSelect;
+export type ModelObjective = typeof modelObjectives.$inferSelect;
+export type KnowledgeCollection = typeof knowledgeCollections.$inferSelect;
+export type KnowledgeSource = typeof knowledgeSources.$inferSelect;
+export type KnowledgeChunk = typeof knowledgeChunks.$inferSelect;
+export type ModelEvaluation = typeof modelEvaluations.$inferSelect;
 export type AuditEntry = typeof auditEntries.$inferSelect;
 export type DesktopAgent = typeof desktopAgents.$inferSelect;
 export type DesktopPairing = typeof desktopPairings.$inferSelect;
