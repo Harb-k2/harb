@@ -1,17 +1,7 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+import { boolean, int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
 
-/**
- * Core user table backing auth flow.
- * Extend this file with additional tables as your product grows.
- * Columns use camelCase to match both database fields and generated types.
- */
 export const users = mysqlTable("users", {
-  /**
-   * Surrogate primary key. Auto-incremented numeric value managed by the database.
-   * Use this for relations between tables.
-   */
   id: int("id").autoincrement().primaryKey(),
-  /** Manus OAuth identifier (openId) returned from the OAuth callback. Unique per user. */
   openId: varchar("openId", { length: 64 }).notNull().unique(),
   name: text("name"),
   email: varchar("email", { length: 320 }),
@@ -22,7 +12,111 @@ export const users = mysqlTable("users", {
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
 });
 
+export const ownerRules = mysqlTable("owner_rules", {
+  id: varchar("id", { length: 48 }).primaryKey(),
+  ownerId: int("ownerId").notNull(),
+  title: varchar("title", { length: 160 }).notNull(),
+  description: text("description"),
+  matchTerms: text("matchTerms").notNull(),
+  scope: mysqlEnum("scope", ["all", "general", "command", "file_change", "data_share"]).default("all").notNull(),
+  action: mysqlEnum("action", ["allow", "approval", "deny"]).default("approval").notNull(),
+  priority: int("priority").default(100).notNull(),
+  isActive: boolean("isActive").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const harbTasks = mysqlTable("harb_tasks", {
+  id: varchar("id", { length: 48 }).primaryKey(),
+  ownerId: int("ownerId").notNull(),
+  request: text("request").notNull(),
+  taskType: varchar("taskType", { length: 32 }).notNull(),
+  status: mysqlEnum("status", ["queued", "needs_approval", "blocked", "completed", "failed"]).notNull(),
+  decision: varchar("decision", { length: 32 }).notNull(),
+  decisionReason: text("decisionReason").notNull(),
+  response: text("response"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  completedAt: timestamp("completedAt"),
+});
+
+export const approvals = mysqlTable("approvals", {
+  id: varchar("id", { length: 48 }).primaryKey(),
+  ownerId: int("ownerId").notNull(),
+  taskId: varchar("taskId", { length: 48 }).notNull(),
+  action: varchar("action", { length: 64 }).notNull(),
+  riskLevel: mysqlEnum("riskLevel", ["low", "medium", "high"]).default("high").notNull(),
+  status: mysqlEnum("status", ["requested", "approved", "rejected"]).default("requested").notNull(),
+  summary: text("summary").notNull(),
+  expiresAt: timestamp("expiresAt"),
+  resolvedAt: timestamp("resolvedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const workspaceFiles = mysqlTable("workspace_files", {
+  id: varchar("id", { length: 48 }).primaryKey(),
+  ownerId: int("ownerId").notNull(),
+  name: varchar("name", { length: 320 }).notNull(),
+  mimeType: varchar("mimeType", { length: 160 }).notNull(),
+  size: int("size").notNull(),
+  storageKey: varchar("storageKey", { length: 700 }).notNull(),
+  storageUrl: varchar("storageUrl", { length: 1024 }).notNull(),
+  classification: mysqlEnum("classification", ["private", "restricted", "shared"]).default("private").notNull(),
+  permissionState: mysqlEnum("permissionState", ["allowed", "restricted", "approval_required"]).default("allowed").notNull(),
+  approvalState: mysqlEnum("approvalState", ["not_required", "pending", "approved", "rejected"]).default("not_required").notNull(),
+  lastApprovalAt: timestamp("lastApprovalAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const fileAccessApprovals = mysqlTable("file_access_approvals", {
+  id: varchar("id", { length: 48 }).primaryKey(),
+  ownerId: int("ownerId").notNull(),
+  fileId: varchar("fileId", { length: 48 }).notNull(),
+  action: mysqlEnum("action", ["share", "modify", "delete"]).notNull(),
+  status: mysqlEnum("status", ["requested", "approved", "rejected"]).default("requested").notNull(),
+  requestedAt: timestamp("requestedAt").defaultNow().notNull(),
+  resolvedAt: timestamp("resolvedAt"),
+});
+
+export const auditEntries = mysqlTable("audit_entries", {
+  id: varchar("id", { length: 48 }).primaryKey(),
+  ownerId: int("ownerId").notNull(),
+  eventType: varchar("eventType", { length: 64 }).notNull(),
+  requestId: varchar("requestId", { length: 48 }),
+  outcome: varchar("outcome", { length: 32 }).notNull(),
+  summary: text("summary").notNull(),
+  ruleIds: text("ruleIds").notNull(),
+  metadata: text("metadata").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const desktopAgents = mysqlTable("desktop_agents", {
+  id: varchar("id", { length: 48 }).primaryKey(),
+  ownerId: int("ownerId").notNull(),
+  name: varchar("name", { length: 160 }).notNull(),
+  operatingSystem: mysqlEnum("operatingSystem", ["windows", "kali_linux"]).notNull(),
+  status: mysqlEnum("status", ["offline", "online", "approval_required"]).default("offline").notNull(),
+  scopes: text("scopes").notNull(),
+  agentTokenHash: varchar("agentTokenHash", { length: 128 }).notNull(),
+  lastSeenAt: timestamp("lastSeenAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const desktopPairings = mysqlTable("desktop_pairings", {
+  id: varchar("id", { length: 48 }).primaryKey(),
+  ownerId: int("ownerId").notNull(),
+  codeHash: varchar("codeHash", { length: 128 }).notNull().unique(),
+  expiresAt: timestamp("expiresAt").notNull(),
+  consumedAt: timestamp("consumedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
-
-// TODO: Add your tables here
+export type OwnerRule = typeof ownerRules.$inferSelect;
+export type HarbTask = typeof harbTasks.$inferSelect;
+export type Approval = typeof approvals.$inferSelect;
+export type WorkspaceFile = typeof workspaceFiles.$inferSelect;
+export type FileAccessApproval = typeof fileAccessApprovals.$inferSelect;
+export type AuditEntry = typeof auditEntries.$inferSelect;
+export type DesktopAgent = typeof desktopAgents.$inferSelect;
+export type DesktopPairing = typeof desktopPairings.$inferSelect;

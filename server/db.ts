@@ -1,11 +1,23 @@
-import { eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users } from "../drizzle/schema";
-import { ENV } from './_core/env';
+import { nanoid } from "nanoid";
+import {
+  approvals,
+  auditEntries,
+  desktopAgents,
+  desktopPairings,
+  fileAccessApprovals,
+  harbTasks,
+  InsertUser,
+  ownerRules,
+  OwnerRule,
+  users,
+  workspaceFiles,
+} from "../drizzle/schema";
+import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
-// Lazily create the drizzle instance so local tooling can run without a DB.
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
@@ -19,74 +31,253 @@ export async function getDb() {
 }
 
 export async function upsertUser(user: InsertUser): Promise<void> {
-  if (!user.openId) {
-    throw new Error("User openId is required for upsert");
-  }
-
+  if (!user.openId) throw new Error("User openId is required for upsert");
   const db = await getDb();
-  if (!db) {
-    console.warn("[Database] Cannot upsert user: database not available");
-    return;
-  }
+  if (!db) return;
 
-  try {
-    const values: InsertUser = {
-      openId: user.openId,
-    };
-    const updateSet: Record<string, unknown> = {};
-
-    const textFields = ["name", "email", "loginMethod"] as const;
-    type TextField = (typeof textFields)[number];
-
-    const assignNullable = (field: TextField) => {
-      const value = user[field];
-      if (value === undefined) return;
-      const normalized = value ?? null;
-      values[field] = normalized;
-      updateSet[field] = normalized;
-    };
-
-    textFields.forEach(assignNullable);
-
-    if (user.lastSignedIn !== undefined) {
-      values.lastSignedIn = user.lastSignedIn;
-      updateSet.lastSignedIn = user.lastSignedIn;
+  const values: InsertUser = { openId: user.openId, lastSignedIn: new Date() };
+  const updateSet: Record<string, unknown> = { lastSignedIn: new Date() };
+  (["name", "email", "loginMethod"] as const).forEach(field => {
+    if (user[field] !== undefined) {
+      values[field] = user[field];
+      updateSet[field] = user[field];
     }
-    if (user.role !== undefined) {
-      values.role = user.role;
-      updateSet.role = user.role;
-    } else if (user.openId === ENV.ownerOpenId) {
-      values.role = 'admin';
-      updateSet.role = 'admin';
-    }
-
-    if (!values.lastSignedIn) {
-      values.lastSignedIn = new Date();
-    }
-
-    if (Object.keys(updateSet).length === 0) {
-      updateSet.lastSignedIn = new Date();
-    }
-
-    await db.insert(users).values(values).onDuplicateKeyUpdate({
-      set: updateSet,
-    });
-  } catch (error) {
-    console.error("[Database] Failed to upsert user:", error);
-    throw error;
-  }
+  });
+  values.role = user.role ?? (user.openId === ENV.ownerOpenId ? "admin" : "user");
+  updateSet.role = values.role;
+  await db.insert(users).values(values).onDuplicateKeyUpdate({ set: updateSet });
 }
 
 export async function getUserByOpenId(openId: string) {
   const db = await getDb();
-  if (!db) {
-    console.warn("[Database] Cannot get user: database not available");
-    return undefined;
-  }
-
+  if (!db) return undefined;
   const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
-
-  return result.length > 0 ? result[0] : undefined;
+  return result[0];
 }
 
-// TODO: add feature queries here as your schema grows.
+const defaultRules = (ownerId: number) => [
+  {
+    id: `base-command-${ownerId}`,
+    ownerId,
+    title: "الأوامر المحلية تحتاج موافقة",
+    description: "لا يُشغّل Harb أي أمر على جهاز متصل قبل موافقة صريحة من المالك.",
+    matchTerms: "تشغيل,نفذ,نفّذ,command,terminal,cmd,powershell,bash,script",
+    scope: "command" as const,
+    action: "approval" as const,
+    priority: 1000,
+    isActive: true,
+  },
+  {
+    id: `base-files-${ownerId}`,
+    ownerId,
+    title: "تعديل الملفات الحساسة يحتاج موافقة",
+    description: "يتطلب الحذف أو التعديل أو النقل تأكيداً واضحاً قبل إرسال الطلب إلى عميل سطح المكتب.",
+    matchTerms: "حذف,امسح,تعديل ملف,انقل ملف,delete,remove,modify file",
+    scope: "file_change" as const,
+    action: "approval" as const,
+    priority: 950,
+    isActive: true,
+  },
+  {
+    id: `base-sharing-${ownerId}`,
+    ownerId,
+    title: "مشاركة البيانات تحتاج موافقة",
+    description: "لا تُرسل الملفات أو البيانات إلى أي وجهة خارجية دون قبول المالك.",
+    matchTerms: "مشاركة,أرسل,ارفع,share,send,upload,publish",
+    scope: "data_share" as const,
+    action: "approval" as const,
+    priority: 900,
+    isActive: true,
+  },
+];
+
+export async function ensureHarbDefaults(ownerId: number) {
+  const db = await getDb();
+  if (!db) return;
+  for (const rule of defaultRules(ownerId)) {
+    await db.insert(ownerRules).values(rule).onDuplicateKeyUpdate({ set: { updatedAt: new Date() } });
+  }
+}
+
+export async function listRules(ownerId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(ownerRules).where(eq(ownerRules.ownerId, ownerId)).orderBy(desc(ownerRules.priority));
+}
+
+export async function createRule(ownerId: number, values: Omit<OwnerRule, "id" | "ownerId" | "createdAt" | "updatedAt">) {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  const record = { id: nanoid(), ownerId, ...values };
+  await db.insert(ownerRules).values(record);
+  return record;
+}
+
+export async function updateRule(ownerId: number, id: string, values: Partial<Omit<OwnerRule, "id" | "ownerId" | "createdAt" | "updatedAt">>) {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  await db.update(ownerRules).set({ ...values, updatedAt: new Date() }).where(and(eq(ownerRules.id, id), eq(ownerRules.ownerId, ownerId)));
+}
+
+export async function listTasks(ownerId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(harbTasks).where(eq(harbTasks.ownerId, ownerId)).orderBy(desc(harbTasks.createdAt)).limit(12);
+}
+
+export async function createTask(ownerId: number, values: Omit<typeof harbTasks.$inferInsert, "id" | "ownerId" | "createdAt">) {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  const record = { id: nanoid(), ownerId, ...values };
+  await db.insert(harbTasks).values(record);
+  return record;
+}
+
+export async function updateTask(ownerId: number, id: string, values: Partial<Omit<typeof harbTasks.$inferInsert, "id" | "ownerId" | "createdAt">>) {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  await db.update(harbTasks).set(values).where(and(eq(harbTasks.id, id), eq(harbTasks.ownerId, ownerId)));
+}
+
+export async function createApproval(ownerId: number, values: Omit<typeof approvals.$inferInsert, "id" | "ownerId" | "createdAt">) {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  const record = { id: nanoid(), ownerId, ...values };
+  await db.insert(approvals).values(record);
+  return record;
+}
+
+export async function listApprovals(ownerId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(approvals).where(eq(approvals.ownerId, ownerId)).orderBy(desc(approvals.createdAt)).limit(20);
+}
+
+export async function resolveApproval(ownerId: number, id: string, status: "approved" | "rejected") {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  await db.update(approvals).set({ status, resolvedAt: new Date() }).where(and(eq(approvals.id, id), eq(approvals.ownerId, ownerId)));
+}
+
+export async function listFiles(ownerId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(workspaceFiles).where(eq(workspaceFiles.ownerId, ownerId)).orderBy(desc(workspaceFiles.createdAt)).limit(50);
+}
+
+export async function createWorkspaceFile(ownerId: number, values: Omit<typeof workspaceFiles.$inferInsert, "id" | "ownerId" | "createdAt">) {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  const record = { id: nanoid(), ownerId, ...values };
+  await db.insert(workspaceFiles).values(record);
+  return record;
+}
+
+export async function updateWorkspaceFile(ownerId: number, id: string, values: Partial<Pick<typeof workspaceFiles.$inferInsert, "classification" | "permissionState" | "approvalState" | "lastApprovalAt">>) {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  await db.update(workspaceFiles).set(values).where(and(eq(workspaceFiles.id, id), eq(workspaceFiles.ownerId, ownerId)));
+}
+
+export async function requestFileAccessApproval(ownerId: number, fileId: string, action: "share" | "modify" | "delete") {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  const record = { id: nanoid(), ownerId, fileId, action, status: "requested" as const, resolvedAt: null };
+  await db.insert(fileAccessApprovals).values(record);
+  await updateWorkspaceFile(ownerId, fileId, { permissionState: "approval_required", approvalState: "pending", lastApprovalAt: null });
+  return record;
+}
+
+export async function listFileAccessApprovals(ownerId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(fileAccessApprovals).where(eq(fileAccessApprovals.ownerId, ownerId)).orderBy(desc(fileAccessApprovals.requestedAt));
+}
+
+export async function resolveFileAccessApproval(ownerId: number, id: string, status: "approved" | "rejected") {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  const result = await db.select().from(fileAccessApprovals).where(and(eq(fileAccessApprovals.id, id), eq(fileAccessApprovals.ownerId, ownerId))).limit(1);
+  const approval = result[0];
+  if (!approval) throw new Error("طلب موافقة الملف غير موجود.");
+  const now = new Date();
+  await db.update(fileAccessApprovals).set({ status, resolvedAt: now }).where(and(eq(fileAccessApprovals.id, id), eq(fileAccessApprovals.ownerId, ownerId)));
+  await updateWorkspaceFile(ownerId, approval.fileId, {
+    permissionState: status === "approved" ? "allowed" : "restricted",
+    approvalState: status,
+    lastApprovalAt: now,
+  });
+  return approval;
+}
+
+export async function createAuditEntry(ownerId: number, values: Omit<typeof auditEntries.$inferInsert, "id" | "ownerId" | "createdAt">) {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(auditEntries).values({ id: nanoid(), ownerId, ...values });
+}
+
+export async function listAuditEntries(ownerId: number, search = "") {
+  const db = await getDb();
+  if (!db) return [];
+  const entries = await db.select().from(auditEntries).where(eq(auditEntries.ownerId, ownerId)).orderBy(desc(auditEntries.createdAt)).limit(100);
+  const normalized = search.trim().toLocaleLowerCase();
+  if (!normalized) return entries;
+  return entries.filter(entry => `${entry.eventType} ${entry.summary} ${entry.outcome}`.toLocaleLowerCase().includes(normalized));
+}
+
+export async function listDesktopAgents(ownerId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select({
+    id: desktopAgents.id,
+    ownerId: desktopAgents.ownerId,
+    name: desktopAgents.name,
+    operatingSystem: desktopAgents.operatingSystem,
+    status: desktopAgents.status,
+    scopes: desktopAgents.scopes,
+    lastSeenAt: desktopAgents.lastSeenAt,
+    createdAt: desktopAgents.createdAt,
+  }).from(desktopAgents).where(eq(desktopAgents.ownerId, ownerId)).orderBy(desc(desktopAgents.lastSeenAt));
+}
+
+export async function getDesktopAgentById(id: string) {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  const result = await db.select().from(desktopAgents).where(eq(desktopAgents.id, id)).limit(1);
+  return result[0];
+}
+
+export async function createDesktopPairing(ownerId: number, codeHash: string, expiresAt: Date) {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  const record = { id: nanoid(), ownerId, codeHash, expiresAt, consumedAt: null };
+  await db.insert(desktopPairings).values(record);
+  return record;
+}
+
+export async function findDesktopPairing(codeHash: string) {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  const result = await db.select().from(desktopPairings).where(eq(desktopPairings.codeHash, codeHash)).limit(1);
+  return result[0];
+}
+
+export async function consumeDesktopPairing(ownerId: number, id: string) {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  await db.update(desktopPairings).set({ consumedAt: new Date() }).where(and(eq(desktopPairings.id, id), eq(desktopPairings.ownerId, ownerId)));
+}
+
+export async function createDesktopAgent(ownerId: number, values: Omit<typeof desktopAgents.$inferInsert, "id" | "ownerId" | "createdAt">) {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  const record = { id: nanoid(), ownerId, ...values };
+  await db.insert(desktopAgents).values(record);
+  return record;
+}
+
+export async function updateDesktopAgent(ownerId: number, id: string, values: Partial<Pick<typeof desktopAgents.$inferInsert, "scopes" | "status" | "lastSeenAt">>) {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  await db.update(desktopAgents).set(values).where(and(eq(desktopAgents.id, id), eq(desktopAgents.ownerId, ownerId)));
+}

@@ -1,5 +1,34 @@
 {
   "version": "7",
   "dialect": "mysql",
-  "entries": []
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1787436093992,
+      "tag": "0000_colorful_zodiak",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1787436445311,
+      "tag": "0001_light_lila_cheney",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1787437034632,
+      "tag": "0002_panoramic_wrecking_crew",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1787437389246,
+      "tag": "0003_overrated_black_tom",
+      "breakpoints": true
+    }
+  ]
 }
