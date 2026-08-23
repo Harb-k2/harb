@@ -1,0 +1,82 @@
+{
+  "datasetName": "Harb Public Evaluation References",
+  "owner": "Harb",
+  "purpose": "إسناد وتقييم أولي فقط؛ لا تستخدم هذه المراجع تلقائياً للتدريب أو لجمع المحتوى.",
+  "licenseOrAuthority": "راجع شروط كل مصدر رسمي قبل جلب أي محتوى أو إنشاء أمثلة تدريب.",
+  "classification": "shared",
+  "containsPersonalData": false,
+  "containsSecrets": false,
+  "deidentificationStatus": "not_applicable",
+  "humanReviewer": "pending_owner_review",
+  "reviewedAt": null,
+  "sources": [
+    {
+      "id": "cisa_kev",
+      "name": "CISA Known Exploited Vulnerabilities Catalog",
+      "url": "https://www.cisa.gov/known-exploited-vulnerabilities-catalog",
+      "usage": "evaluation_reference_only",
+      "rightsStatus": "review_required"
+    },
+    {
+      "id": "nvd",
+      "name": "NVD Vulnerability Data Feeds",
+      "url": "https://nvd.nist.gov/vuln/data-feeds",
+      "usage": "evaluation_reference_only",
+      "rightsStatus": "review_required"
+    },
+    {
+      "id": "mitre_attack",
+      "name": "MITRE ATT&CK",
+      "url": "https://attack.mitre.org/resources/working-with-attack/",
+      "usage": "limited_evaluation_candidate",
+      "rightsStatus": "license_notice_required"
+    },
+    {
+      "id": "owasp_wstg",
+      "name": "OWASP Web Security Testing Guide",
+      "url": "https://owasp.org/www-project-web-security-testing-guide/",
+      "usage": "limited_evaluation_candidate",
+      "rightsStatus": "attribution_and_sharealike_review_required"
+    },
+    {
+      "id": "mitre_cwe",
+      "name": "MITRE Common Weakness Enumeration",
+      "url": "https://cwe.mitre.org/about/termsofuse.html",
+      "usage": "limited_evaluation_candidate",
+      "rightsStatus": "license_notice_required"
+    },
+    {
+      "id": "mitre_capec",
+      "name": "MITRE Common Attack Pattern Enumeration and Classification",
+      "url": "https://capec.mitre.org/about/termsofuse.html",
+      "usage": "limited_evaluation_candidate",
+      "rightsStatus": "license_notice_required"
+    },
+    {
+      "id": "owasp_asvs",
+      "name": "OWASP Application Security Verification Standard",
+      "url": "https://owasp.org/www-project-application-security-verification-standard/",
+      "usage": "limited_evaluation_candidate",
+      "rightsStatus": "attribution_and_sharealike_review_required"
+    },
+    {
+      "id": "first_cvss",
+      "name": "FIRST Common Vulnerability Scoring System",
+      "url": "https://www.first.org/cvss/",
+      "usage": "evaluation_reference_only",
+      "rightsStatus": "review_required"
+    },
+    {
+      "id": "nist_csf_2",
+      "name": "NIST Cybersecurity Framework 2.0",
+      "url": "https://www.nist.gov/cyberframework",
+      "usage": "evaluation_reference_only",
+      "rightsStatus": "review_required"
+    }
+  ],
+  "splitPolicy": {
+    "method": "لا تنشأ تقسيمات قبل اعتماد المالك لمصادر وأمثلة محددة.",
+    "deduplicationRequired": true,
+    "leakageCheckRequired": true
+  }
+}

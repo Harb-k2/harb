@@ -1,0 +1,18 @@
+{
+  "datasetName": "",
+  "owner": "",
+  "purpose": "",
+  "licenseOrAuthority": "",
+  "classification": "private",
+  "containsPersonalData": false,
+  "containsSecrets": false,
+  "deidentificationStatus": "pending",
+  "humanReviewer": "",
+  "reviewedAt": null,
+  "sources": [],
+  "splitPolicy": {
+    "method": "",
+    "deduplicationRequired": true,
+    "leakageCheckRequired": true
+  }
+}

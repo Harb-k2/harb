@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Harb Authorized Instruction Record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "taskCategory", "instruction", "expectedBehavior", "split", "sourceRef", "rightsConfirmed", "safetyReview"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "taskCategory": { "enum": ["knowledge_analysis", "authorization_decision", "structured_extraction", "retrieval_grounded_answer", "authorized_cyber_analysis"] },
+    "instruction": { "type": "string", "minLength": 1 },
+    "expectedBehavior": { "type": "string", "minLength": 1 },
+    "split": { "enum": ["train", "validation", "test"] },
+    "sourceRef": { "type": "string", "minLength": 1 },
+    "rightsConfirmed": { "const": true },
+    "safetyReview": { "enum": ["approved", "rejected"] },
+    "containsPersonalData": { "type": "boolean" },
+    "containsSecrets": { "type": "boolean" },
+    "deidentificationRef": { "type": "string" }
+  }
+}
