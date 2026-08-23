@@ -364,6 +364,12 @@ describe("Harb permission workflows", () => {
     expect(db.createModelEvaluation).not.toHaveBeenCalled();
   });
 
+  it("يثبت وضع النماذج الجاهزة ويرفض طلب تدريب أو تخصيص", async () => {
+    const caller = appRouter.createCaller(createContext());
+    await expect(caller.harb.lab.modelMode()).resolves.toEqual(expect.objectContaining({ mode: "ready_models_only", trainingEnabled: false }));
+    await expect(caller.harb.lab.training.requestCustomization()).rejects.toThrow("النماذج الجاهزة فقط");
+  });
+
   it("يسجل نتيجة تقييم فعلية بدليل مرجعي قبل اعتماد النموذج", async () => {
     db.listModelEvaluations.mockResolvedValue([{ id: "evaluation-01", modelId: "gpt-5", status: "draft", notes: "حالات اختبار مؤسسية" }]);
 

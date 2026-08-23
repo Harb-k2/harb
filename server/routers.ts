@@ -83,6 +83,8 @@ const publicEvaluationSources = {
   first_cvss: { name: "FIRST Common Vulnerability Scoring System (CVSS)", url: "https://www.first.org/cvss/", licenseNote: "مرجع تقييمي فقط إلى حين مراجعة المؤسسة لشروط النسخ والتوزيع والاستخدام في السياق المقصود." },
   nist_csf_2: { name: "NIST Cybersecurity Framework 2.0", url: "https://www.nist.gov/cyberframework", licenseNote: "مرجع تقييمي لحوكمة المخاطر؛ راجع المؤسسة حقوق إعادة الاستخدام وسياق النشر قبل إدخاله في بيانات تدريب." },
 } as const;
+const HARB_MODEL_MODE = "ready_models_only" as const;
+const READY_MODEL_MODE_MESSAGE = "وضع Harb الحالي يعتمد على النماذج الجاهزة فقط؛ التدريب والتخصيص وGPU غير مفعلة.";
 const hashSecret = (value: string) => createHash("sha256").update(value).digest("hex");
 const signDesktopApprovalTicket = (agentId: string, approval: { id: string; action: string; expiresAt: Date | null }) => {
   const payload = Buffer.from(JSON.stringify({ agentId, approvalId: approval.id, action: approval.action, expiresAt: approval.expiresAt?.getTime() ?? 0 })).toString("base64url");
@@ -170,6 +172,12 @@ export const appRouter = router({
       models: protectedProcedure.query(async () => {
         const catalog = await listLLMModels();
         return catalog.data.map(item => ({ id: item.id, name: item.id }));
+      }),
+      modelMode: protectedProcedure.query(() => ({ mode: HARB_MODEL_MODE, trainingEnabled: false, message: READY_MODEL_MODE_MESSAGE })),
+      training: router({
+        requestCustomization: protectedProcedure.mutation(() => {
+          throw new Error(READY_MODEL_MODE_MESSAGE);
+        }),
       }),
       objectives: router({
         create: protectedProcedure.input(z.object({
