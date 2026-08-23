@@ -1,0 +1,14 @@
+# Default repository reviewer. GitHub requests review only when this owner has write access.
+* @Harb-k2
+
+# Security policy and repository governance.
+/SECURITY.md @Harb-k2
+/.github/ @Harb-k2
+
+# Server, authorization, persistence, and migrations.
+/server/ @Harb-k2
+/drizzle/ @Harb-k2
+
+# Desktop agent and training governance contain security-sensitive controls.
+/desktop-agent/ @Harb-k2
+/training/ @Harb-k2
