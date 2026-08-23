@@ -1,0 +1,61 @@
+name: Package Harb Desktop Agent
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "desktop-agent/**"
+      - ".github/workflows/desktop-agent-packages.yml"
+
+jobs:
+  linux:
+    name: Kali/Linux packages
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop-agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: desktop-agent/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      - run: pnpm package:linux
+      - uses: actions/upload-artifact@v4
+        with:
+          name: harb-desktop-linux
+          path: desktop-agent/dist/*.AppImage
+      - uses: actions/upload-artifact@v4
+        with:
+          name: harb-desktop-kali-deb
+          path: desktop-agent/dist/*.deb
+
+  windows:
+    name: Windows packages
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: desktop-agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: desktop-agent/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      - run: pnpm package:win
+      - uses: actions/upload-artifact@v4
+        with:
+          name: harb-desktop-windows
+          path: desktop-agent/dist/*.exe

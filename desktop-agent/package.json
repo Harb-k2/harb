@@ -1,0 +1,49 @@
+{
+  "name": "harb-desktop-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Harb local desktop agent for authorized Windows and Kali Linux workflows",
+  "desktopName": "harb-desktop-agent",
+  "homepage": "https://harb.local/desktop",
+  "author": {
+    "name": "Harb Desktop Project",
+    "email": "maintainer@harb.local"
+  },
+  "main": "src/main.cjs",
+  "scripts": {
+    "dev": "electron .",
+    "start": "electron .",
+    "test": "node --test test/*.test.cjs",
+    "package:linux": "electron-builder --linux AppImage deb",
+    "package:win": "electron-builder --win portable nsis",
+    "package:win:dir": "electron-builder --win --dir",
+    "package:dir": "electron-builder --dir"
+  },
+  "dependencies": {
+    "@trpc/client": "^11.6.0",
+    "superjson": "^1.13.3"
+  },
+  "devDependencies": {
+    "electron": "^37.4.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "im.harb.desktop",
+    "productName": "Harb Desktop",
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "asarUnpack": [],
+    "linux": {
+      "maintainer": "Harb Desktop Project <maintainer@harb.local>",
+      "category": "Utility",
+      "syncDesktopName": true,
+      "target": ["AppImage", "deb"]
+    },
+    "win": {
+      "target": ["nsis", "portable"]
+    }
+  }
+}

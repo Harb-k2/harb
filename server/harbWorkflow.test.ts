@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
 import type { TrpcContext } from "./_core/context";
+
+const desktopToken = "A".repeat(32);
+const desktopTokenHash = createHash("sha256").update(desktopToken).digest("hex");
 
 const db = vi.hoisted(() => ({
   createApproval: vi.fn(),
@@ -111,11 +115,13 @@ describe("Harb permission workflows", () => {
     db.createModelEvaluation.mockResolvedValue({ id: "evaluation-01" });
     db.listModelObjectives.mockResolvedValue([{ id: "objective-01" }]);
     db.listKnowledgeCollections.mockResolvedValue([{ id: "collection-01" }]);
+    db.listApprovals.mockResolvedValue([]);
     db.listFiles.mockResolvedValue([{ id: "file-01", name: "policy.pdf", storageKey: "owner/policy.pdf", mimeType: "application/pdf", size: 800 }]);
     db.searchKnowledgeChunks.mockResolvedValue([]);
     llm.listLLMModels.mockResolvedValue({ data: [{ id: "gpt-5" }] });
     llm.invokeLLM.mockResolvedValue({ choices: [{ message: { content: "تحليل آمن ومقيد بالتفويض." } }] });
     db.getKnowledgeSource.mockResolvedValue({ id: "source-01", collectionId: "collection-01", sourceType: "workspace_file", storageKey: "owner/notes.txt", mimeType: "text/plain" });
+    db.getDesktopAgentById.mockResolvedValue({ id: "agent-01", ownerId: 7, agentTokenHash: desktopTokenHash, status: "online", scopes: "read_files,run_commands" });
     knowledgeIndex.indexKnowledgeStorageObject.mockResolvedValue({ status: "ready", chunks: [{ excerpt: "تفويض الأصل قبل أي اختبار.", contentHash: "hash-01" }] });
   });
 
@@ -191,6 +197,48 @@ describe("Harb permission workflows", () => {
     expect(result).toEqual({ success: true });
     expect(db.updateDesktopAgent).toHaveBeenCalledWith(7, "agent-01", { scopes: "read_files,run_commands", status: "online" });
     expect(db.createAuditEntry).toHaveBeenCalledWith(7, expect.objectContaining({ eventType: "desktop.scopes_updated" }));
+  });
+
+  it("يسجل حدث العميل المحلي بالبيانات الوصفية فقط بعد تحقق الرمز", async () => {
+    const result = await appRouter.createCaller(createContext()).harb.desktop.auditEvent({ agentId: "agent-01", agentToken: desktopToken, eventType: "read_file_preview", fileName: "inventory.txt", fileSize: 420 });
+
+    expect(result).toEqual({ success: true });
+    expect(db.createAuditEntry).toHaveBeenCalledWith(7, expect.objectContaining({ eventType: "desktop.local.read_file_preview", metadata: expect.stringContaining("inventory.txt") }));
+  });
+
+  it("يعيد قانون المالك والموافقات المعلقة للعميل ويوثق نبضاً وصفياً", async () => {
+    db.getDesktopAgentById.mockResolvedValueOnce({ id: "agent-01", ownerId: 7, agentTokenHash: desktopTokenHash, status: "online", scopes: "read_files", lastSeenAt: new Date(Date.now() - 6 * 60 * 1000) });
+    db.listApprovals.mockResolvedValue([{ id: "approval-local-01", status: "requested", action: "desktop:run_command", summary: "[desktop:agent-01] فحص محلي مفوض", expiresAt: new Date(Date.now() + 60_000) }]);
+    const result = await appRouter.createCaller(createContext()).harb.desktop.heartbeat({ agentId: "agent-01", agentToken: desktopToken });
+
+    expect(result.ownerPolicy.localAction).toBe("approval");
+    expect(result.pendingApprovals).toHaveLength(1);
+    expect(result.pendingApprovals[0]?.summary).toBe("فحص محلي مفوض");
+    expect(db.createAuditEntry).toHaveBeenCalledWith(7, expect.objectContaining({ eventType: "desktop.local.heartbeat" }));
+  });
+
+  it("ينشئ طلب موافقة لإجراء محلي ولا ينفذ العملية", async () => {
+    const result = await appRouter.createCaller(createContext()).harb.desktop.requestLocalApproval({ agentId: "agent-01", agentToken: desktopToken, operation: "run_command", summary: "تنفيذ فحص محلي مصرح به ضمن النطاق." });
+
+    expect(result.decision).toBe("approval");
+    expect(db.createTask).toHaveBeenCalledWith(7, expect.objectContaining({ status: "needs_approval", taskType: "command" }));
+    expect(db.createApproval).toHaveBeenCalledWith(7, expect.objectContaining({ action: "desktop:run_command", status: "requested" }));
+  });
+
+  it("يرفض طلب موافقة محلي عندما لا يملك العميل النطاق المطلوب", async () => {
+    db.getDesktopAgentById.mockResolvedValueOnce({ id: "agent-01", ownerId: 7, agentTokenHash: desktopTokenHash, status: "online", scopes: "read_files" });
+    const result = await appRouter.createCaller(createContext()).harb.desktop.requestLocalApproval({ agentId: "agent-01", agentToken: desktopToken, operation: "run_program", summary: "تشغيل أداة محلية ضمن النطاق." });
+
+    expect(result.decision).toBe("deny");
+    expect(db.createApproval).not.toHaveBeenCalled();
+  });
+
+  it("يحسم موافقة عميل سطح المكتب من جلسة المالك المصادق عليها", async () => {
+    const result = await appRouter.createCaller(createContext()).harb.approvals.resolve({ id: "approval-local-01", status: "approved" });
+
+    expect(result).toEqual({ success: true });
+    expect(db.resolveApproval).toHaveBeenCalledWith(7, "approval-local-01", "approved");
+    expect(db.createAuditEntry).toHaveBeenCalledWith(7, expect.objectContaining({ eventType: "approval.resolved", outcome: "approved" }));
   });
 
   it("يطلب موافقة صريحة قبل التخطيط لاختبار سيبراني نشط", async () => {

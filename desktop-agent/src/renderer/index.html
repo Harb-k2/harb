@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Harb Desktop</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar"><div><p class="eyebrow">HARB / LOCAL AGENT</p><h1>عميل Harb لسطح المكتب</h1></div><div id="connection-badge" class="badge pending">غير مقترن</div></header>
+    <section class="hero"><div><p class="eyebrow">AUTHORIZED OPERATIONS ONLY</p><h2>بوابة محلية مقيدة بقانون المالك</h2><p>لا يقرأ العميل ملفاً أو يشغل برنامجاً أو أمراً أو يعدل ملفاً إلا ضمن النطاق الممنوح وبعد تأكيد المستخدم المحلي.</p></div><button id="heartbeat" class="secondary">تحديث الحالة</button></section>
+    <section class="grid two"><article class="card"><div class="card-title"><div><p class="eyebrow">PAIRING</p><h3>اقتران آمن</h3></div><span class="icon">⌁</span></div><form id="pair-form"><label>رابط منصة Harb<input id="server-url" required type="url" placeholder="https://harb.example.com" /></label><label>اسم هذا الجهاز<input id="agent-name" required maxlength="160" placeholder="Harb on Kali" /></label><label>رمز الاقتران لمرة واحدة<input id="pair-code" required maxlength="32" placeholder="ABCD-EFGH" /></label><button type="submit">ربط العميل</button></form><p class="hint">يصدر الرمز من لوحة Harb ويُستهلك مرة واحدة. لا يمنح الاقتران نطاقات تشغيل تلقائياً.</p></article>
+      <article class="card"><div class="card-title"><div><p class="eyebrow">LOCAL POLICY</p><h3>حالة الحماية المحلية</h3></div><span class="icon">◈</span></div><dl id="status-list" class="status-list"></dl><div class="scopes"><p>النطاقات الفعالة</p><div id="scope-list" class="scope-list"></div></div><button id="open-audit" class="secondary wide">فتح سجل التدقيق المحلي</button></article></section>
+    <section class="grid two"><article class="card"><div class="card-title"><div><p class="eyebrow">SAFE READ ONLY</p><h3>معاينة ملف باختيار صريح</h3></div><span class="icon">◫</span></div><p class="hint">تتاح المعاينة فقط لنطاق <code>read_files</code>، وبعد اختيارك المباشر للملف. الحد الأقصى للعرض 64 كيلوبايت.</p><button id="preview-file" class="secondary">اختيار ملف للمعاينة</button><pre id="file-preview" class="preview">لم يتم اختيار ملف.</pre></article>
+      <article class="card muted"><div class="card-title"><div><p class="eyebrow">EXECUTION GATES</p><h3>طلبات موافقة محلية</h3></div><span class="icon">⊘</span></div><p>لا ينفذ العميل البرامج أو الأوامر أو تعديل الملفات. يمر كل طلب أولاً بقانون المالك والنطاق محلياً ثم يسجل للمراجعة في جلسة المالك المصادق عليها داخل لوحة Harb.</p><form id="approval-form"><label>نوع الإجراء<select id="operation-type"><option value="run_program">تشغيل برنامج</option><option value="run_command">تشغيل أمر</option><option value="modify_file">تعديل ملف</option></select></label><label>ملخص الطلب دون أسرار أو محتوى حساس<textarea id="operation-summary" required minlength="4" maxlength="500" placeholder="اشرح الإجراء والغرض والنطاق المفوض."></textarea></label><button type="submit">طلب موافقة المالك</button></form><div class="pending"><div class="pending-title"><p>الموافقات المعلقة</p><button id="open-dashboard" class="secondary compact" type="button">فتح لوحة Harb</button></div><div id="pending-approvals" class="pending-list">لا توجد موافقات معلقة.</div></div></article></section>
+    <p id="notice" class="notice" role="status"></p>
+  </main>
+  <script src="./renderer.js"></script>
+</body>
+</html>

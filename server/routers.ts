@@ -605,8 +605,67 @@ export const appRouter = router({
       heartbeat: publicProcedure.input(z.object({ agentId: z.string().min(1), agentToken: z.string().min(24).max(128) })).mutation(async ({ input }) => {
         const agent = await getDesktopAgentById(input.agentId);
         if (!agent || !hasMatchingSecret(input.agentToken, agent.agentTokenHash)) throw new Error("تعذر التحقق من عميل سطح المكتب.");
+        const shouldAuditHeartbeat = !agent.lastSeenAt || Date.now() - agent.lastSeenAt.getTime() >= 5 * 60 * 1000;
         await updateDesktopAgent(agent.ownerId, agent.id, { lastSeenAt: new Date() });
-        return { status: agent.status, scopes: agent.scopes ? agent.scopes.split(",").filter(Boolean) : [] };
+        if (shouldAuditHeartbeat) await createAuditEntry(agent.ownerId, { eventType: "desktop.local.heartbeat", requestId: agent.id, outcome: "recorded", summary: "أرسل عميل سطح المكتب نبضة حالة وصفية.", ruleIds: "", metadata: JSON.stringify({ source: "desktop_agent" }) });
+        await ensureHarbDefaults(agent.ownerId);
+        const [rules, cyberPolicy, approvals] = await Promise.all([listRules(agent.ownerId), ensureCyberOwnerPolicy(agent.ownerId), listApprovals(agent.ownerId)]);
+        const pendingApprovals = approvals.filter(item => item.status === "requested" && item.summary.startsWith(`[desktop:${agent.id}]`)).map(item => ({ id: item.id, action: item.action, summary: item.summary.replace(`[desktop:${agent.id}] `, ""), expiresAt: item.expiresAt }));
+        return {
+          status: agent.status,
+          scopes: agent.scopes ? agent.scopes.split(",").filter(Boolean) : [],
+          ownerPolicy: { localAction: cyberPolicy.localAction, requireAuthorizationAcknowledgment: cyberPolicy.requireAuthorizationAcknowledgment, rules: rules.map(asPolicyRule) },
+          pendingApprovals,
+        };
+      }),
+      requestLocalApproval: publicProcedure.input(z.object({
+        agentId: z.string().min(1),
+        agentToken: z.string().min(24).max(128),
+        operation: z.enum(["run_program", "run_command", "modify_file"]),
+        summary: z.string().trim().min(4).max(500),
+      })).mutation(async ({ input }) => {
+        const agent = await getDesktopAgentById(input.agentId);
+        if (!agent || !hasMatchingSecret(input.agentToken, agent.agentTokenHash)) throw new Error("تعذر التحقق من عميل سطح المكتب.");
+        const requiredScope = input.operation === "modify_file" ? "modify_files" : input.operation === "run_program" ? "run_programs" : "run_commands";
+        const agentScopes = agent.scopes ? agent.scopes.split(",").filter(Boolean) : [];
+        if (!agentScopes.includes(requiredScope)) {
+          const reason = "لم يمنح المالك نطاق العميل المطلوب لهذا الإجراء المحلي.";
+          await createAuditEntry(agent.ownerId, { eventType: "desktop.local.request_blocked", requestId: agent.id, outcome: "blocked", summary: reason, ruleIds: "", metadata: JSON.stringify({ operation: input.operation, requiredScope }) });
+          return { decision: "deny" as const, reason };
+        }
+        await ensureHarbDefaults(agent.ownerId);
+        const [rules, cyberPolicy] = await Promise.all([listRules(agent.ownerId), ensureCyberOwnerPolicy(agent.ownerId)]);
+        const requestedScope = input.operation === "modify_file" ? "file_change" : "command";
+        const ruleDecision = evaluateOwnerRules(`طلب محلي ${input.operation}: ${input.summary}`, rules.map(asPolicyRule));
+        if (cyberPolicy.localAction === "deny" || ruleDecision.outcome === "deny") {
+          const reason = cyberPolicy.localAction === "deny" ? "قانون المالك السيبراني يمنع الإجراءات المحلية حالياً." : ruleDecision.reason;
+          await createAuditEntry(agent.ownerId, { eventType: "desktop.local.request_blocked", requestId: agent.id, outcome: "blocked", summary: reason, ruleIds: ruleDecision.matchedRules.map(rule => rule.id).join(","), metadata: JSON.stringify({ operation: input.operation }) });
+          return { decision: "deny" as const, reason };
+        }
+        const task = await createTask(agent.ownerId, { request: `[desktop:${agent.id}] ${input.summary}`, taskType: requestedScope, status: "needs_approval", decision: "approval", decisionReason: "الإجراء المحلي يتطلب موافقة صريحة من المالك قبل التنفيذ.", response: null, completedAt: null });
+        const approval = await createApproval(agent.ownerId, { taskId: task.id, action: `desktop:${input.operation}`, riskLevel: "high", status: "requested", summary: `[desktop:${agent.id}] ${input.summary}`, expiresAt: new Date(Date.now() + 10 * 60 * 1000), resolvedAt: null });
+        await createAuditEntry(agent.ownerId, { eventType: "desktop.local.approval_requested", requestId: task.id, outcome: "approval_requested", summary: "طلب العميل المحلي موافقة على إجراء محلي؛ لم يُنفذ أي أمر.", ruleIds: ruleDecision.matchedRules.map(rule => rule.id).join(","), metadata: JSON.stringify({ agentId: agent.id, operation: input.operation, approvalId: approval.id }) });
+        return { decision: "approval" as const, approvalId: approval.id, expiresAt: approval.expiresAt };
+      }),
+      auditEvent: publicProcedure.input(z.object({
+        agentId: z.string().min(1),
+        agentToken: z.string().min(24).max(128),
+        eventType: z.enum(["paired", "read_file_preview", "local_operation_blocked"]),
+        fileName: z.string().max(260).optional(),
+        fileSize: z.number().int().nonnegative().max(1_000_000_000_000).optional(),
+        reason: z.string().max(500).optional(),
+      })).mutation(async ({ input }) => {
+        const agent = await getDesktopAgentById(input.agentId);
+        if (!agent || !hasMatchingSecret(input.agentToken, agent.agentTokenHash)) throw new Error("تعذر التحقق من عميل سطح المكتب.");
+        await createAuditEntry(agent.ownerId, {
+          eventType: `desktop.local.${input.eventType}`,
+          requestId: agent.id,
+          outcome: input.eventType === "local_operation_blocked" ? "blocked" : "recorded",
+          summary: input.eventType === "read_file_preview" ? "عاين العميل المحلي ملفاً اختاره المستخدم ضمن نطاق القراءة." : input.eventType === "paired" ? "أكد العميل المحلي إتمام الاقتران." : "حجب العميل المحلي عملية خارج نطاق التفويض أو دون موافقة.",
+          ruleIds: "",
+          metadata: JSON.stringify({ fileName: input.fileName, fileSize: input.fileSize, reason: input.reason, source: "desktop_agent" }),
+        });
+        return { success: true };
       }),
       updateScopes: protectedProcedure.input(z.object({ id: z.string().min(1), scopes: z.array(desktopScopeSchema).max(4) })).mutation(async ({ ctx, input }) => {
         const status = input.scopes.length ? "online" : "approval_required";
