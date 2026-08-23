@@ -28,6 +28,6 @@ pnpm package:win
 
 | الحزمة | SHA-256 |
 | --- | --- |
-| `Harb Desktop-0.1.0.AppImage` | `3ce9975ee6637c9fc9063bd6ab80c17a4f1bf47ddc1152539b499b3b2a7b1af3` |
-| `harb-desktop-agent_0.1.0_amd64.deb` | `eee100b8165e049f71687707f0a19014b464dfc92438aba434f81ffcbaba4a18` |
-| `Harb-Desktop-0.1.0-win-x64.zip` | `77b6f3e1a24b8069f3af4407f7a9c0513af6f15ee8e48cbbc1238da46b2d61b6` |
+| `Harb Desktop-0.1.0.AppImage` | `7755f518807045e186a422edf4f7af420526a171233bb90ab8354e00330e6f2c` |
+| `harb-desktop-agent_0.1.0_amd64.deb` | `ce43eef24e8a5e1120dfac1c15fc3b78c46247659221450728eb29c324a6e896` |
+| `Harb-Desktop-0.1.0-win-x64.zip` | `db362b58f67371754bad0d25b13b3a4df2f7064a0f08392374da685f9a0479a5` |

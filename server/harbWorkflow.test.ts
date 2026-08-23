@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import type { TrpcContext } from "./_core/context";
+import { ENV } from "./_core/env";
 
 const desktopToken = "A".repeat(32);
 const desktopTokenHash = createHash("sha256").update(desktopToken).digest("hex");
@@ -231,6 +232,19 @@ describe("Harb permission workflows", () => {
 
     expect(result.decision).toBe("deny");
     expect(db.createApproval).not.toHaveBeenCalled();
+  });
+
+  it("يتحقق خادم Harb من تذكرة موافقة سطح المكتب الموقعة قبل إتاحتها للبوابة المحلية", async () => {
+    const expiresAt = new Date(Date.now() + 60_000);
+    const payload = Buffer.from(JSON.stringify({ agentId: "agent-01", approvalId: "approval-local-01", action: "desktop:run_command", expiresAt: expiresAt.getTime() })).toString("base64url");
+    const ticket = `${payload}.${createHmac("sha256", ENV.cookieSecret).update(payload).digest("base64url")}`;
+    db.listApprovals.mockResolvedValue([{ id: "approval-local-01", status: "approved", action: "desktop:run_command", summary: "[desktop:agent-01] فحص محلي مفوض", expiresAt }]);
+
+    const result = await appRouter.createCaller(createContext()).harb.desktop.validateLocalApprovalTicket({ agentId: "agent-01", agentToken: desktopToken, operation: "run_command", ticket });
+    const tampered = await appRouter.createCaller(createContext()).harb.desktop.validateLocalApprovalTicket({ agentId: "agent-01", agentToken: desktopToken, operation: "run_command", ticket: `${ticket}tampered` });
+
+    expect(result).toEqual(expect.objectContaining({ valid: true, approval: expect.objectContaining({ id: "approval-local-01", action: "desktop:run_command" }) }));
+    expect(tampered).toEqual({ valid: false });
   });
 
   it("يحسم موافقة عميل سطح المكتب من جلسة المالك المصادق عليها", async () => {

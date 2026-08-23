@@ -22,4 +22,8 @@ async function requestLocalApproval(serverUrl, payload) {
   return createHarbClient(serverUrl).harb.desktop.requestLocalApproval.mutate(payload);
 }
 
-module.exports = { claimPairing, heartbeat, auditEvent, requestLocalApproval };
+async function validateLocalApprovalTicket(serverUrl, payload) {
+  return createHarbClient(serverUrl).harb.desktop.validateLocalApprovalTicket.mutate(payload);
+}
+
+module.exports = { claimPairing, heartbeat, auditEvent, requestLocalApproval, validateLocalApprovalTicket };

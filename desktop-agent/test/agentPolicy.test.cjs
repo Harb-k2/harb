@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { evaluateLocalOperation, hasPendingLocalApproval } = require("../src/agentPolicy.cjs");
+const { evaluateLocalOperation, hasPendingLocalApproval, evaluateExecutionGate } = require("../src/agentPolicy.cjs");
 
 test("يرفض العميل القراءة من دون نطاق read_files", () => {
   const result = evaluateLocalOperation({ scopes: [], operation: "read_file", explicitUserApproval: true });
@@ -42,4 +42,20 @@ test("يحوّل كل نوع تنفيذي مفوض إلى موافقة قبل إ
 test("يمنع إنشاء طلب تنفيذي مكرر عند وجود تذكرة معلقة للعميل", () => {
   assert.equal(hasPendingLocalApproval([{ action: "desktop:run_command" }], "run_command"), true);
   assert.equal(hasPendingLocalApproval([{ action: "desktop:run_command" }], "modify_file"), false);
+});
+
+test("تظل بوابة التنفيذ مقفلة لكل نوع حتى مع تذكرة اعتماد متحقق منها خادمياً", () => {
+  const cases = [["run_program", "run_programs"], ["run_command", "run_commands"], ["modify_file", "modify_files"]];
+  for (const [operation, scope] of cases) {
+    const withoutTicket = evaluateExecutionGate({ scopes: [scope], operation, explicitUserApproval: true, ownerPolicy: { localAction: "allow", rules: [] } });
+    const withTicket = evaluateExecutionGate({ scopes: [scope], operation, explicitUserApproval: true, ownerPolicy: { localAction: "allow", rules: [] }, approvedTicket: { id: "approval-01", action: `desktop:${operation}` } });
+    assert.equal(withoutTicket.state, "awaiting_owner_approval", operation);
+    assert.equal(withTicket.state, "executor_disabled", operation);
+    assert.equal(withTicket.executable, false, operation);
+  }
+});
+
+test("يرفض بوابة التنفيذ تذكرة خادم تخص نوع إجراء مختلف", () => {
+  const result = evaluateExecutionGate({ scopes: ["run_commands"], operation: "run_command", explicitUserApproval: true, ownerPolicy: { localAction: "allow", rules: [] }, approvedTicket: { id: "approval-01", action: "desktop:modify_file" } });
+  assert.equal(result.state, "awaiting_owner_approval");
 });

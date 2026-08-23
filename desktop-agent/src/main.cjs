@@ -2,8 +2,8 @@ const { app, BrowserWindow, ipcMain, dialog, safeStorage, shell } = require("ele
 const crypto = require("node:crypto");
 const fs = require("node:fs/promises");
 const path = require("node:path");
-const { claimPairing, heartbeat, auditEvent, requestLocalApproval } = require("./api.cjs");
-const { evaluateLocalOperation, hasPendingLocalApproval } = require("./agentPolicy.cjs");
+const { claimPairing, heartbeat, auditEvent, requestLocalApproval, validateLocalApprovalTicket } = require("./api.cjs");
+const { evaluateLocalOperation, hasPendingLocalApproval, evaluateExecutionGate } = require("./agentPolicy.cjs");
 
 let mainWindow;
 let heartbeatTimer;
@@ -37,8 +37,8 @@ async function saveConfig(config) {
 }
 
 function publicStatus(config) {
-  const { agentToken, agentTokenEncrypted, ...safeConfig } = config;
-  return { ...safeConfig, secretConfigured: Boolean(agentToken) };
+  const { agentToken, agentTokenEncrypted, approvedTickets, ...safeConfig } = config;
+  return { ...safeConfig, approvedTicketCount: approvedTickets?.length ?? 0, secretConfigured: Boolean(agentToken) };
 }
 
 async function writeAudit(event, details = {}) {
@@ -63,7 +63,7 @@ async function refreshHeartbeat() {
   const config = await loadConfig();
   if (!config.serverUrl || !config.agentId || !config.agentToken) return config;
   const result = await heartbeat(config.serverUrl, { agentId: config.agentId, agentToken: config.agentToken });
-  const updated = { ...config, scopes: result.scopes ?? [], status: result.status ?? "approval_required", ownerPolicy: result.ownerPolicy ?? null, pendingApprovals: result.pendingApprovals ?? [], lastHeartbeatAt: new Date().toISOString() };
+  const updated = { ...config, scopes: result.scopes ?? [], status: result.status ?? "approval_required", ownerPolicy: result.ownerPolicy ?? null, pendingApprovals: result.pendingApprovals ?? [], approvedTickets: result.approvedTickets ?? [], lastHeartbeatAt: new Date().toISOString() };
   await saveConfig(updated);
   await writeAudit("heartbeat", { status: updated.status, scopes: updated.scopes });
   return updated;
@@ -142,6 +142,22 @@ ipcMain.handle("agent:request-local-approval", async (_event, input) => {
   await refreshHeartbeat();
   return result;
 });
+async function checkBlockedExecutionGate(operation) {
+  const config = await loadConfig();
+  const ticket = (config.approvedTickets ?? []).find(item => item.action === `desktop:${operation}`)?.ticket;
+  let approvedTicket = null;
+  if (ticket && config.serverUrl && config.agentId && config.agentToken) {
+    const validation = await validateLocalApprovalTicket(config.serverUrl, { agentId: config.agentId, agentToken: config.agentToken, operation, ticket });
+    approvedTicket = validation.valid ? validation.approval : null;
+  }
+  const gate = evaluateExecutionGate({ scopes: config.scopes, operation, explicitUserApproval: true, ownerPolicy: config.ownerPolicy, approvedTicket });
+  await writeAudit("execution_gate_checked", { operation, state: gate.state, reason: gate.reason });
+  await syncAuditEvent("local_operation_blocked", { reason: gate.reason });
+  return gate;
+}
+ipcMain.handle("agent:gate-run-program", async () => checkBlockedExecutionGate("run_program"));
+ipcMain.handle("agent:gate-run-command", async () => checkBlockedExecutionGate("run_command"));
+ipcMain.handle("agent:gate-modify-file", async () => checkBlockedExecutionGate("modify_file"));
 ipcMain.handle("agent:open-dashboard", async () => {
   const config = await loadConfig();
   if (!config.serverUrl) throw new Error("لا يوجد رابط منصة Harb محفوظ.");

@@ -1,7 +1,8 @@
 import { nanoid } from "nanoid";
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { invokeLLM, listLLMModels } from "./_core/llm";
+import { ENV } from "./_core/env";
 import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
@@ -73,6 +74,20 @@ const publicEvaluationSources = {
   owasp_wstg: { name: "OWASP Web Security Testing Guide", url: "https://owasp.org/www-project-web-security-testing-guide/", licenseNote: "CC BY-SA 4.0؛ استخدم الإصدار والرابط المناسبين عند الإسناد وألزم شروط النسبة والمشاركة بالمثل." },
 } as const;
 const hashSecret = (value: string) => createHash("sha256").update(value).digest("hex");
+const signDesktopApprovalTicket = (agentId: string, approval: { id: string; action: string; expiresAt: Date | null }) => {
+  const payload = Buffer.from(JSON.stringify({ agentId, approvalId: approval.id, action: approval.action, expiresAt: approval.expiresAt?.getTime() ?? 0 })).toString("base64url");
+  const signature = createHmac("sha256", ENV.cookieSecret).update(payload).digest("base64url");
+  return `${payload}.${signature}`;
+};
+const readDesktopApprovalTicket = (ticket: string) => {
+  const [payload, signature] = ticket.split(".");
+  if (!payload || !signature) return null;
+  const expected = createHmac("sha256", ENV.cookieSecret).update(payload).digest("base64url");
+  const left = Buffer.from(signature);
+  const right = Buffer.from(expected);
+  if (left.length !== right.length || !timingSafeEqual(left, right)) return null;
+  try { return JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { agentId: string; approvalId: string; action: string; expiresAt: number }; } catch { return null; }
+};
 const hasMatchingSecret = (provided: string, storedHash: string) => {
   const incoming = Buffer.from(hashSecret(provided), "hex");
   const stored = Buffer.from(storedHash, "hex");
@@ -611,11 +626,13 @@ export const appRouter = router({
         await ensureHarbDefaults(agent.ownerId);
         const [rules, cyberPolicy, approvals] = await Promise.all([listRules(agent.ownerId), ensureCyberOwnerPolicy(agent.ownerId), listApprovals(agent.ownerId)]);
         const pendingApprovals = approvals.filter(item => item.status === "requested" && item.summary.startsWith(`[desktop:${agent.id}]`)).map(item => ({ id: item.id, action: item.action, summary: item.summary.replace(`[desktop:${agent.id}] `, ""), expiresAt: item.expiresAt }));
+        const approvedTickets = approvals.filter(item => item.status === "approved" && item.summary.startsWith(`[desktop:${agent.id}]`) && item.expiresAt && item.expiresAt.getTime() > Date.now()).map(item => ({ id: item.id, action: item.action, expiresAt: item.expiresAt, ticket: signDesktopApprovalTicket(agent.id, item) }));
         return {
           status: agent.status,
           scopes: agent.scopes ? agent.scopes.split(",").filter(Boolean) : [],
           ownerPolicy: { localAction: cyberPolicy.localAction, requireAuthorizationAcknowledgment: cyberPolicy.requireAuthorizationAcknowledgment, rules: rules.map(asPolicyRule) },
           pendingApprovals,
+          approvedTickets,
         };
       }),
       requestLocalApproval: publicProcedure.input(z.object({
@@ -646,6 +663,20 @@ export const appRouter = router({
         const approval = await createApproval(agent.ownerId, { taskId: task.id, action: `desktop:${input.operation}`, riskLevel: "high", status: "requested", summary: `[desktop:${agent.id}] ${input.summary}`, expiresAt: new Date(Date.now() + 10 * 60 * 1000), resolvedAt: null });
         await createAuditEntry(agent.ownerId, { eventType: "desktop.local.approval_requested", requestId: task.id, outcome: "approval_requested", summary: "طلب العميل المحلي موافقة على إجراء محلي؛ لم يُنفذ أي أمر.", ruleIds: ruleDecision.matchedRules.map(rule => rule.id).join(","), metadata: JSON.stringify({ agentId: agent.id, operation: input.operation, approvalId: approval.id }) });
         return { decision: "approval" as const, approvalId: approval.id, expiresAt: approval.expiresAt };
+      }),
+      validateLocalApprovalTicket: publicProcedure.input(z.object({
+        agentId: z.string().min(1),
+        agentToken: z.string().min(24).max(128),
+        operation: z.enum(["run_program", "run_command", "modify_file"]),
+        ticket: z.string().min(20).max(2000),
+      })).mutation(async ({ input }) => {
+        const agent = await getDesktopAgentById(input.agentId);
+        if (!agent || !hasMatchingSecret(input.agentToken, agent.agentTokenHash)) throw new Error("تعذر التحقق من عميل سطح المكتب.");
+        const claim = readDesktopApprovalTicket(input.ticket);
+        if (!claim || claim.agentId !== agent.id || claim.action !== `desktop:${input.operation}` || claim.expiresAt <= Date.now()) return { valid: false as const };
+        const approval = (await listApprovals(agent.ownerId)).find(item => item.id === claim.approvalId && item.status === "approved" && item.action === claim.action && item.summary.startsWith(`[desktop:${agent.id}]`) && item.expiresAt && item.expiresAt.getTime() > Date.now());
+        if (!approval) return { valid: false as const };
+        return { valid: true as const, approval: { id: approval.id, action: approval.action, expiresAt: approval.expiresAt } };
       }),
       auditEvent: publicProcedure.input(z.object({
         agentId: z.string().min(1),

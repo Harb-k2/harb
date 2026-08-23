@@ -7,5 +7,8 @@ contextBridge.exposeInMainWorld("harbAgent", {
   selectAndPreviewFile: () => ipcRenderer.invoke("agent:select-and-preview-file"),
   openAuditFolder: () => ipcRenderer.invoke("agent:open-audit-folder"),
   requestLocalApproval: input => ipcRenderer.invoke("agent:request-local-approval", input),
+  checkProgramGate: () => ipcRenderer.invoke("agent:gate-run-program"),
+  checkCommandGate: () => ipcRenderer.invoke("agent:gate-run-command"),
+  checkModifyFileGate: () => ipcRenderer.invoke("agent:gate-modify-file"),
   openDashboard: () => ipcRenderer.invoke("agent:open-dashboard"),
 });

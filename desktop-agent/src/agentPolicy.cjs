@@ -35,4 +35,11 @@ function hasPendingLocalApproval(pendingApprovals, operation) {
   return (pendingApprovals ?? []).some(item => item?.action === `desktop:${operation}`);
 }
 
-module.exports = { SCOPES, canPerform, evaluateOwnerPolicy, evaluateLocalOperation, hasPendingLocalApproval };
+function evaluateExecutionGate({ scopes, operation, explicitUserApproval, ownerPolicy, approvedTicket }) {
+  const policy = evaluateLocalOperation({ scopes, operation, explicitUserApproval, ownerPolicy });
+  if (!policy.requiresApproval) return { executable: false, state: "blocked", reason: policy.reason };
+  if (!approvedTicket || approvedTicket.action !== `desktop:${operation}`) return { executable: false, state: "awaiting_owner_approval", reason: "لا توجد تذكرة موافقة سارية ومتحقق منها خادمياً لهذا الإجراء المحلي." };
+  return { executable: false, state: "executor_disabled", approvalId: approvedTicket.id, reason: "تحققت بوابة التفويض وتذكرة المالك خادمياً، لكن منفذ النظام معطّل افتراضياً في هذا الإصدار ولا يشغّل أوامر أو برامج ولا يعدّل ملفات." };
+}
+
+module.exports = { SCOPES, canPerform, evaluateOwnerPolicy, evaluateLocalOperation, hasPendingLocalApproval, evaluateExecutionGate };
