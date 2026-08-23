@@ -16,12 +16,15 @@ const db = vi.hoisted(() => ({
   createKnowledgeCollection: vi.fn(),
   createModelEvaluation: vi.fn(),
   createModelObjective: vi.fn(),
+  completeModelEvaluation: vi.fn(),
   createRule: vi.fn(),
   createTask: vi.fn(),
   createWorkspaceFile: vi.fn(),
+  approveBaseModelSelection: vi.fn(),
   ensureCyberOwnerPolicy: vi.fn(),
   ensureHarbDefaults: vi.fn(),
   findDesktopPairing: vi.fn(),
+  getBaseModelSelection: vi.fn(),
   getDesktopAgentById: vi.fn(),
   getCyberAsset: vi.fn(),
   getCyberOperation: vi.fn(),
@@ -46,6 +49,7 @@ const db = vi.hoisted(() => ({
   registerKnowledgeSource: vi.fn(),
   replaceKnowledgeChunks: vi.fn(),
   searchKnowledgeChunks: vi.fn(),
+  saveBaseModelSelection: vi.fn(),
   updateDesktopAgent: vi.fn(),
   updateCyberOwnerPolicy: vi.fn(),
   updateCyberOperation: vi.fn(),
@@ -114,12 +118,17 @@ describe("Harb permission workflows", () => {
     db.createKnowledgeCollection.mockResolvedValue({ id: "collection-01", name: "مراجع الفريق", classification: "private" });
     db.registerKnowledgeSource.mockResolvedValue({ id: "source-01", name: "policy.pdf" });
     db.createModelEvaluation.mockResolvedValue({ id: "evaluation-01" });
+    db.completeModelEvaluation.mockResolvedValue({ id: "evaluation-01", modelId: "gpt-5", status: "completed", score: 92 });
+    db.getBaseModelSelection.mockResolvedValue(undefined);
+    db.saveBaseModelSelection.mockResolvedValue({ id: "base-model-01", primaryModelId: "gpt-5", fallbackModelId: "gpt-5-mini", status: "draft" });
+    db.approveBaseModelSelection.mockResolvedValue({ id: "base-model-01", primaryModelId: "gpt-5", fallbackModelId: null, status: "approved" });
+    db.listModelEvaluations.mockResolvedValue([]);
     db.listModelObjectives.mockResolvedValue([{ id: "objective-01" }]);
     db.listKnowledgeCollections.mockResolvedValue([{ id: "collection-01" }]);
     db.listApprovals.mockResolvedValue([]);
     db.listFiles.mockResolvedValue([{ id: "file-01", name: "policy.pdf", storageKey: "owner/policy.pdf", mimeType: "application/pdf", size: 800 }]);
     db.searchKnowledgeChunks.mockResolvedValue([]);
-    llm.listLLMModels.mockResolvedValue({ data: [{ id: "gpt-5" }] });
+    llm.listLLMModels.mockResolvedValue({ data: [{ id: "gpt-5" }, { id: "gpt-5-mini" }] });
     llm.invokeLLM.mockResolvedValue({ choices: [{ message: { content: "تحليل آمن ومقيد بالتفويض." } }] });
     db.getKnowledgeSource.mockResolvedValue({ id: "source-01", collectionId: "collection-01", sourceType: "workspace_file", storageKey: "owner/notes.txt", mimeType: "text/plain" });
     db.getDesktopAgentById.mockResolvedValue({ id: "agent-01", ownerId: 7, agentTokenHash: desktopTokenHash, status: "online", scopes: "read_files,run_commands" });
@@ -341,10 +350,62 @@ describe("Harb permission workflows", () => {
   });
 
   it("ينشئ مسودة تقييم ولا يبدأ التجربة من دون حالات اختبار مصرح بها", async () => {
-    const result = await appRouter.createCaller(createContext()).harb.lab.evaluations.create({ objectiveId: "objective-01", collectionId: "collection-01", modelId: "gpt-test", notes: "تقييم أولي" });
+    const result = await appRouter.createCaller(createContext()).harb.lab.evaluations.create({ objectiveId: "objective-01", collectionId: "collection-01", modelId: "gpt-5", notes: "تقييم أولي" });
 
     expect(result).toEqual(expect.objectContaining({ id: "evaluation-01" }));
     expect(db.createModelEvaluation).toHaveBeenCalledWith(7, expect.objectContaining({ status: "draft", sampleCount: 0, passedCount: 0 }));
     expect(db.createAuditEntry).toHaveBeenCalledWith(7, expect.objectContaining({ eventType: "lab.evaluation_drafted" }));
+  });
+
+  it("يرفض مسودة تقييم لنموذج غير موجود في الكتالوج الحي", async () => {
+    await expect(appRouter.createCaller(createContext()).harb.lab.evaluations.create({ objectiveId: "objective-01", modelId: "unknown-model" })).rejects.toThrow("معرف النموذج غير متاح");
+    expect(db.createModelEvaluation).not.toHaveBeenCalled();
+  });
+
+  it("يسجل نتيجة تقييم فعلية بدليل مرجعي قبل اعتماد النموذج", async () => {
+    db.listModelEvaluations.mockResolvedValue([{ id: "evaluation-01", modelId: "gpt-5", status: "draft", notes: "حالات اختبار مؤسسية" }]);
+
+    const result = await appRouter.createCaller(createContext()).harb.lab.evaluations.recordCompletion({ evaluationId: "evaluation-01", sampleCount: 50, passedCount: 46, score: 92, evidenceReference: "report://harb/baseline-001" });
+
+    expect(result).toEqual(expect.objectContaining({ id: "evaluation-01", status: "completed" }));
+    expect(db.completeModelEvaluation).toHaveBeenCalledWith(7, "evaluation-01", expect.objectContaining({ sampleCount: 50, passedCount: 46, score: 92, notes: expect.stringContaining("baseline-001") }));
+    expect(db.createAuditEntry).toHaveBeenCalledWith(7, expect.objectContaining({ eventType: "lab.evaluation_completed" }));
+  });
+
+  it("يرفض نتيجة تقييم عندما يتجاوز المجتاز إجمالي الحالات", async () => {
+    await expect(appRouter.createCaller(createContext()).harb.lab.evaluations.recordCompletion({ evaluationId: "evaluation-01", sampleCount: 5, passedCount: 6, score: 80, evidenceReference: "report://harb/invalid" })).rejects.toThrow("يتجاوز عدد الحالات");
+    expect(db.completeModelEvaluation).not.toHaveBeenCalled();
+  });
+
+  it("يحفظ ترشيح نموذج أساس وبديل بانتظار التقييم واعتماد المالك", async () => {
+    const result = await appRouter.createCaller(createContext()).harb.lab.baseModelSelection.saveDraft({ primaryModelId: "gpt-5", fallbackModelId: "gpt-5-mini", rationale: "تجربة مقارنة منظمة وفق قانون المالك." });
+
+    expect(result).toEqual(expect.objectContaining({ id: "base-model-01", status: "draft" }));
+    expect(db.saveBaseModelSelection).toHaveBeenCalledWith(7, expect.objectContaining({ primaryModelId: "gpt-5", fallbackModelId: "gpt-5-mini", status: "draft" }));
+    expect(db.createAuditEntry).toHaveBeenCalledWith(7, expect.objectContaining({ eventType: "lab.base_model_drafted" }));
+  });
+
+  it("يرفض نموذجاً بديلاً مطابقاً للنموذج الرئيسي", async () => {
+    await expect(appRouter.createCaller(createContext()).harb.lab.baseModelSelection.saveDraft({ primaryModelId: "gpt-5", fallbackModelId: "gpt-5", rationale: "مبرر صالح نصياً لاختبار حظر التكرار." })).rejects.toThrow("النموذج البديل مختلف");
+    expect(db.saveBaseModelSelection).not.toHaveBeenCalled();
+  });
+
+  it("يعتمد نموذج Harb بعد اكتمال تقييمه المرتبط", async () => {
+    db.getBaseModelSelection.mockResolvedValue({ id: "base-model-01", primaryModelId: "gpt-5", fallbackModelId: null, primaryEvaluationId: "evaluation-01", fallbackEvaluationId: null, status: "draft" });
+    db.listModelEvaluations.mockResolvedValue([{ id: "evaluation-01", modelId: "gpt-5", status: "completed" }]);
+
+    const result = await appRouter.createCaller(createContext()).harb.lab.baseModelSelection.approve();
+
+    expect(result).toEqual(expect.objectContaining({ id: "base-model-01", status: "approved" }));
+    expect(db.approveBaseModelSelection).toHaveBeenCalledWith(7);
+    expect(db.createAuditEntry).toHaveBeenCalledWith(7, expect.objectContaining({ eventType: "lab.base_model_approved", outcome: "approved" }));
+  });
+
+  it("يمنع اعتماد نموذج Harb قبل اكتمال التقييم المرتبط", async () => {
+    db.getBaseModelSelection.mockResolvedValue({ id: "base-model-01", primaryModelId: "gpt-5", fallbackModelId: null, primaryEvaluationId: "evaluation-01", fallbackEvaluationId: null, status: "draft" });
+    db.listModelEvaluations.mockResolvedValue([{ id: "evaluation-01", modelId: "gpt-5", status: "draft" }]);
+
+    await expect(appRouter.createCaller(createContext()).harb.lab.baseModelSelection.approve()).rejects.toThrow("قبل اكتمال تقييمه");
+    expect(db.approveBaseModelSelection).not.toHaveBeenCalled();
   });
 });

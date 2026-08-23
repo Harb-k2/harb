@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Harb Approved GPU Target",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["provider", "region", "approvedBy", "storageEncryption", "accessControl", "networkPolicy", "retentionPolicy"],
+  "properties": {
+    "provider": { "type": "string", "minLength": 1 },
+    "region": { "type": "string", "minLength": 1 },
+    "approvedBy": { "type": "string", "minLength": 1 },
+    "storageEncryption": { "const": true },
+    "accessControl": { "const": true },
+    "networkPolicy": { "type": "string", "minLength": 1 },
+    "retentionPolicy": { "type": "string", "minLength": 1 },
+    "gpuClass": { "type": "string" },
+    "artifactStorageRef": { "type": "string" }
+  }
+}

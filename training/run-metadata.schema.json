@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Harb Training Run Metadata",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["runId", "baseModel", "method", "datasetManifestHash", "trainingDataHash", "validationDataHash", "testDataHash", "ownerApprovalRef", "safetyGateVersion", "status"],
+  "properties": {
+    "runId": { "type": "string", "minLength": 1 },
+    "baseModel": { "type": "string", "minLength": 1 },
+    "method": { "enum": ["lora", "qlora", "full_finetune", "other"] },
+    "datasetManifestHash": { "type": "string", "minLength": 32 },
+    "trainingDataHash": { "type": "string", "minLength": 32 },
+    "validationDataHash": { "type": "string", "minLength": 32 },
+    "testDataHash": { "type": "string", "minLength": 32 },
+    "ownerApprovalRef": { "type": "string", "minLength": 1 },
+    "safetyGateVersion": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["planned", "running", "blocked", "completed", "rejected"] },
+    "baselineMetricsRef": { "type": "string" },
+    "candidateMetricsRef": { "type": "string" },
+    "checkpointStorageRef": { "type": "string" }
+  }
+}

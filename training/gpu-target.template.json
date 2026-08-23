@@ -1,0 +1,11 @@
+{
+  "provider": "",
+  "region": "",
+  "approvedBy": "",
+  "storageEncryption": true,
+  "accessControl": true,
+  "networkPolicy": "",
+  "retentionPolicy": "",
+  "gpuClass": "",
+  "artifactStorageRef": ""
+}

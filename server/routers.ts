@@ -17,12 +17,15 @@ import {
   createKnowledgeCollection,
   createModelEvaluation,
   createModelObjective,
+  completeModelEvaluation,
   createRule,
   createTask,
   createWorkspaceFile,
+  approveBaseModelSelection,
   ensureCyberOwnerPolicy,
   ensureHarbDefaults,
   findDesktopPairing,
+  getBaseModelSelection,
   getDesktopAgentById,
   getCyberAsset,
   getCyberOperation,
@@ -47,6 +50,7 @@ import {
   registerKnowledgeSource,
   replaceKnowledgeChunks,
   searchKnowledgeChunks,
+  saveBaseModelSelection,
   updateDesktopAgent,
   updateCyberOwnerPolicy,
   updateCyberOperation,
@@ -66,12 +70,17 @@ const desktopScopeSchema = z.enum(["read_files", "run_programs", "run_commands",
 const cyberAssetTypeSchema = z.enum(["domain", "ip", "web_app", "api", "host", "cloud", "repository", "local_device"]);
 const cyberEnvironmentSchema = z.enum(["production", "staging", "development", "lab"]);
 const cyberOperationTypeSchema = z.enum(["analysis", "passive_validation", "active_test", "local_execution"]);
-const publicEvaluationSourceSchema = z.enum(["cisa_kev", "nvd", "mitre_attack", "owasp_wstg"]);
+const publicEvaluationSourceSchema = z.enum(["cisa_kev", "nvd", "mitre_attack", "owasp_wstg", "mitre_cwe", "mitre_capec", "owasp_asvs", "first_cvss", "nist_csf_2"]);
 const publicEvaluationSources = {
   cisa_kev: { name: "CISA Known Exploited Vulnerabilities (KEV)", url: "https://www.cisa.gov/known-exploited-vulnerabilities-catalog", licenseNote: "يخضع لاستخدام الموقع لشروط CISA؛ راجع https://www.cisa.gov/terms-use عند كل استخدام أو أتمتة." },
   nvd: { name: "NVD CVE/CPE Data Feeds", url: "https://nvd.nist.gov/vuln/data-feeds", licenseNote: "خدمة عامة وفق شروط NVD؛ اعرض نسبة استخدام NVD المطلوبة ولا تنسب المحتوى المعدل إلى NVD." },
   mitre_attack: { name: "MITRE ATT&CK Data & Tools", url: "https://attack.mitre.org/resources/working-with-attack/", licenseNote: "ترخيص MITRE غير حصري وخالٍ من الإتاوة للبحث والتطوير والاستخدام التجاري مع إعادة إشعار الحقوق والترخيص." },
   owasp_wstg: { name: "OWASP Web Security Testing Guide", url: "https://owasp.org/www-project-web-security-testing-guide/", licenseNote: "CC BY-SA 4.0؛ استخدم الإصدار والرابط المناسبين عند الإسناد وألزم شروط النسبة والمشاركة بالمثل." },
+  mitre_cwe: { name: "MITRE Common Weakness Enumeration (CWE)", url: "https://cwe.mitre.org/about/termsofuse.html", licenseNote: "ترخيص MITRE غير حصري وخالٍ من الإتاوة للبحث والتطوير والاستخدام التجاري مع إعادة إشعار الحقوق والترخيص." },
+  mitre_capec: { name: "MITRE Common Attack Pattern Enumeration and Classification (CAPEC)", url: "https://capec.mitre.org/about/termsofuse.html", licenseNote: "مرجع تصنيفي فقط؛ ترخيص MITRE غير حصري وخالٍ من الإتاوة مع إعادة إشعار الحقوق والترخيص، ولا يستخدم لإنشاء تعليمات تشغيلية." },
+  owasp_asvs: { name: "OWASP Application Security Verification Standard (ASVS)", url: "https://owasp.org/www-project-application-security-verification-standard/", licenseNote: "CC BY-SA 4.0؛ استخدم إصداراً محدداً ونسبة واضحة وراجع شروط المشاركة بالمثل قبل أي استخدام واسع." },
+  first_cvss: { name: "FIRST Common Vulnerability Scoring System (CVSS)", url: "https://www.first.org/cvss/", licenseNote: "مرجع تقييمي فقط إلى حين مراجعة المؤسسة لشروط النسخ والتوزيع والاستخدام في السياق المقصود." },
+  nist_csf_2: { name: "NIST Cybersecurity Framework 2.0", url: "https://www.nist.gov/cyberframework", licenseNote: "مرجع تقييمي لحوكمة المخاطر؛ راجع المؤسسة حقوق إعادة الاستخدام وسياق النشر قبل إدخاله في بيانات تدريب." },
 } as const;
 const hashSecret = (value: string) => createHash("sha256").update(value).digest("hex");
 const signDesktopApprovalTicket = (agentId: string, approval: { id: string; action: string; expiresAt: Date | null }) => {
@@ -146,14 +155,15 @@ export const appRouter = router({
     }),
     lab: router({
       dashboard: protectedProcedure.query(async ({ ctx }) => {
-        const [objectives, collections, sources, evaluations, files] = await Promise.all([
+        const [objectives, collections, sources, evaluations, files, baseModelSelection] = await Promise.all([
           listModelObjectives(ctx.user.id),
           listKnowledgeCollections(ctx.user.id),
           listKnowledgeSources(ctx.user.id),
           listModelEvaluations(ctx.user.id),
           listFiles(ctx.user.id),
+          getBaseModelSelection(ctx.user.id),
         ]);
-        return { objectives, collections, sources, evaluations, files };
+        return { objectives, collections, sources, evaluations, files, baseModelSelection };
       }),
       models: protectedProcedure.query(async () => {
         const catalog = await listLLMModels();
@@ -288,6 +298,12 @@ export const appRouter = router({
         })).mutation(async ({ ctx, input }) => {
           const objectives = await listModelObjectives(ctx.user.id);
           if (!objectives.some(item => item.id === input.objectiveId)) throw new Error("هدف النموذج غير موجود.");
+          if (input.collectionId) {
+            const collections = await listKnowledgeCollections(ctx.user.id);
+            if (!collections.some(item => item.id === input.collectionId)) throw new Error("مجموعة المعرفة غير موجودة.");
+          }
+          const catalog = await listLLMModels();
+          if (!catalog.data.some(item => item.id === input.modelId)) throw new Error("معرف النموذج غير متاح في كتالوج Harb الحالي.");
           const evaluation = await createModelEvaluation(ctx.user.id, {
             objectiveId: input.objectiveId,
             collectionId: input.collectionId ?? null,
@@ -307,6 +323,67 @@ export const appRouter = router({
             metadata: JSON.stringify({ objectiveId: input.objectiveId, modelId: input.modelId }),
           });
           return evaluation;
+        }),
+        recordCompletion: protectedProcedure.input(z.object({
+          evaluationId: z.string().min(1),
+          sampleCount: z.number().int().min(1).max(1_000_000),
+          passedCount: z.number().int().min(0).max(1_000_000),
+          score: z.number().int().min(0).max(100),
+          evidenceReference: z.string().trim().min(3).max(1000),
+        })).mutation(async ({ ctx, input }) => {
+          if (input.passedCount > input.sampleCount) throw new Error("لا يمكن أن يتجاوز عدد الحالات المجتازة إجمالي الحالات.");
+          const evaluations = await listModelEvaluations(ctx.user.id);
+          const evaluation = evaluations.find(item => item.id === input.evaluationId);
+          if (!evaluation) throw new Error("تجربة التقييم غير موجودة.");
+          if (evaluation.status === "completed") throw new Error("تم تسجيل هذه التجربة كمكتملة بالفعل.");
+          const notes = `${evaluation.notes ? `${evaluation.notes}\n` : ""}[Evidence] ${input.evidenceReference}`;
+          const completed = await completeModelEvaluation(ctx.user.id, input.evaluationId, { sampleCount: input.sampleCount, passedCount: input.passedCount, score: input.score, notes });
+          await createAuditEntry(ctx.user.id, { eventType: "lab.evaluation_completed", requestId: input.evaluationId, outcome: "completed", summary: `تم تسجيل نتيجة تقييم «${evaluation.modelId}» بمقياس ${input.score}%.`, ruleIds: "", metadata: JSON.stringify({ modelId: evaluation.modelId, sampleCount: input.sampleCount, passedCount: input.passedCount, score: input.score, evidenceReference: input.evidenceReference }) });
+          return completed;
+        }),
+      }),
+      baseModelSelection: router({
+        saveDraft: protectedProcedure.input(z.object({
+          primaryModelId: z.string().trim().min(2).max(160),
+          fallbackModelId: z.string().trim().min(2).max(160).optional(),
+          rationale: z.string().trim().min(10).max(4000),
+          primaryEvaluationId: z.string().min(1).optional(),
+          fallbackEvaluationId: z.string().min(1).optional(),
+        })).mutation(async ({ ctx, input }) => {
+          if (input.fallbackModelId === input.primaryModelId) throw new Error("يجب أن يكون النموذج البديل مختلفاً عن النموذج الرئيسي.");
+          const catalog = await listLLMModels();
+          const available = new Set(catalog.data.map(item => item.id));
+          if (!available.has(input.primaryModelId) || (input.fallbackModelId && !available.has(input.fallbackModelId))) throw new Error("أحد النماذج المختارة غير متاح في كتالوج Harb الحالي.");
+          const evaluations = await listModelEvaluations(ctx.user.id);
+          if (input.primaryEvaluationId && !evaluations.some(item => item.id === input.primaryEvaluationId && item.modelId === input.primaryModelId)) throw new Error("مرجع تقييم النموذج الرئيسي غير صالح.");
+          if (input.fallbackEvaluationId && (!input.fallbackModelId || !evaluations.some(item => item.id === input.fallbackEvaluationId && item.modelId === input.fallbackModelId))) throw new Error("مرجع تقييم النموذج البديل غير صالح.");
+          const selection = await saveBaseModelSelection(ctx.user.id, {
+            primaryModelId: input.primaryModelId,
+            fallbackModelId: input.fallbackModelId ?? null,
+            rationale: input.rationale,
+            primaryEvaluationId: input.primaryEvaluationId ?? null,
+            fallbackEvaluationId: input.fallbackEvaluationId ?? null,
+            status: "draft",
+            catalogObservedAt: new Date(),
+            approvedAt: null,
+          });
+          await createAuditEntry(ctx.user.id, { eventType: "lab.base_model_drafted", requestId: selection.id, outcome: "recorded", summary: `تم حفظ ترشيح نموذج أساس «${input.primaryModelId}» بانتظار تقييم واعتماد المالك.`, ruleIds: "", metadata: JSON.stringify({ primaryModelId: input.primaryModelId, fallbackModelId: input.fallbackModelId ?? null }) });
+          return selection;
+        }),
+        approve: protectedProcedure.mutation(async ({ ctx }) => {
+          const selection = await getBaseModelSelection(ctx.user.id);
+          if (!selection) throw new Error("لا توجد مسودة اختيار نموذج لاعتمادها.");
+          if (selection.status === "approved") return selection;
+          const evaluations = await listModelEvaluations(ctx.user.id);
+          const primaryEvaluation = selection.primaryEvaluationId ? evaluations.find(item => item.id === selection.primaryEvaluationId && item.modelId === selection.primaryModelId && item.status === "completed") : undefined;
+          if (!primaryEvaluation) throw new Error("لا يمكن اعتماد النموذج الرئيسي قبل اكتمال تقييمه المرتبط.");
+          if (selection.fallbackModelId) {
+            const fallbackEvaluation = selection.fallbackEvaluationId ? evaluations.find(item => item.id === selection.fallbackEvaluationId && item.modelId === selection.fallbackModelId && item.status === "completed") : undefined;
+            if (!fallbackEvaluation) throw new Error("لا يمكن اعتماد النموذج البديل قبل اكتمال تقييمه المرتبط.");
+          }
+          const approved = await approveBaseModelSelection(ctx.user.id);
+          await createAuditEntry(ctx.user.id, { eventType: "lab.base_model_approved", requestId: approved.id, outcome: "approved", summary: `اعتمد المالك نموذج Harb الأساسي «${approved.primaryModelId}».`, ruleIds: "", metadata: JSON.stringify({ primaryModelId: approved.primaryModelId, fallbackModelId: approved.fallbackModelId }) });
+          return approved;
         }),
       }),
     }),

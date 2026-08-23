@@ -4,6 +4,7 @@ import { nanoid } from "nanoid";
 import {
   approvals,
   auditEntries,
+  baseModelSelections,
   cyberAssets,
   cyberOwnerPolicies,
   cyberOperations,
@@ -383,6 +384,44 @@ export async function createModelEvaluation(ownerId: number, values: Omit<typeof
   const record = { id: nanoid(), ownerId, ...values };
   await db.insert(modelEvaluations).values(record);
   return record;
+}
+
+export async function completeModelEvaluation(ownerId: number, id: string, values: Pick<typeof modelEvaluations.$inferInsert, "sampleCount" | "passedCount" | "score" | "notes">) {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  const completedAt = new Date();
+  await db.update(modelEvaluations).set({ ...values, status: "completed", completedAt }).where(and(eq(modelEvaluations.ownerId, ownerId), eq(modelEvaluations.id, id)));
+  return { id, ownerId, ...values, status: "completed" as const, completedAt };
+}
+
+export async function getBaseModelSelection(ownerId: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const rows = await db.select().from(baseModelSelections).where(eq(baseModelSelections.ownerId, ownerId)).limit(1);
+  return rows[0];
+}
+
+export async function saveBaseModelSelection(ownerId: number, values: Omit<typeof baseModelSelections.$inferInsert, "id" | "ownerId" | "createdAt" | "updatedAt">) {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  const existing = await getBaseModelSelection(ownerId);
+  if (existing) {
+    await db.update(baseModelSelections).set(values).where(eq(baseModelSelections.ownerId, ownerId));
+    return { ...existing, ...values };
+  }
+  const record = { id: nanoid(), ownerId, ...values };
+  await db.insert(baseModelSelections).values(record);
+  return record;
+}
+
+export async function approveBaseModelSelection(ownerId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  const existing = await getBaseModelSelection(ownerId);
+  if (!existing) throw new Error("لا توجد مسودة اختيار نموذج لاعتمادها.");
+  const approvedAt = new Date();
+  await db.update(baseModelSelections).set({ status: "approved", approvedAt }).where(eq(baseModelSelections.ownerId, ownerId));
+  return { ...existing, status: "approved" as const, approvedAt };
 }
 
 export async function listAuditEntries(ownerId: number, search = "") {

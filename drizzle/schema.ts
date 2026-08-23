@@ -188,6 +188,21 @@ export const modelEvaluations = mysqlTable("model_evaluations", {
   completedAt: timestamp("completedAt"),
 });
 
+export const baseModelSelections = mysqlTable("base_model_selections", {
+  id: varchar("id", { length: 48 }).primaryKey(),
+  ownerId: int("ownerId").notNull().unique(),
+  primaryModelId: varchar("primaryModelId", { length: 160 }).notNull(),
+  fallbackModelId: varchar("fallbackModelId", { length: 160 }),
+  status: mysqlEnum("status", ["draft", "approved", "superseded"]).default("draft").notNull(),
+  rationale: text("rationale").notNull(),
+  primaryEvaluationId: varchar("primaryEvaluationId", { length: 48 }),
+  fallbackEvaluationId: varchar("fallbackEvaluationId", { length: 48 }),
+  catalogObservedAt: timestamp("catalogObservedAt").notNull(),
+  approvedAt: timestamp("approvedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
 export const auditEntries = mysqlTable("audit_entries", {
   id: varchar("id", { length: 48 }).primaryKey(),
   ownerId: int("ownerId").notNull(),
@@ -236,6 +251,7 @@ export type KnowledgeCollection = typeof knowledgeCollections.$inferSelect;
 export type KnowledgeSource = typeof knowledgeSources.$inferSelect;
 export type KnowledgeChunk = typeof knowledgeChunks.$inferSelect;
 export type ModelEvaluation = typeof modelEvaluations.$inferSelect;
+export type BaseModelSelection = typeof baseModelSelections.$inferSelect;
 export type AuditEntry = typeof auditEntries.$inferSelect;
 export type DesktopAgent = typeof desktopAgents.$inferSelect;
 export type DesktopPairing = typeof desktopPairings.$inferSelect;

@@ -11,7 +11,14 @@
     "format": "prettier --write .",
     "test": "vitest run",
     "test:training": "node --test training/validate-dataset.test.mjs",
+    "test:training-run": "node --test training/prepare-run.test.mjs",
+    "test:baseline": "node --test training/run-baseline.test.mjs",
+    "test:readiness": "node --test training/readiness-check.test.mjs",
     "training:validate": "node training/validate-dataset.mjs",
+    "training:prepare-run": "node training/prepare-run.mjs",
+    "training:baseline": "node training/run-baseline.mjs",
+    "training:readiness": "node training/readiness-check.mjs",
+    "db:check": "node scripts/check-db-connection.mjs",
     "db:push": "drizzle-kit generate && drizzle-kit migrate"
   },
   "dependencies": {
