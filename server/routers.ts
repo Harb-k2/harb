@@ -30,6 +30,7 @@ import {
   getCyberAsset,
   getCyberOperation,
   getKnowledgeSource,
+  isBaseModelSelectionStoreReady,
   listApprovals,
   listAuditEntries,
   listDesktopAgents,
@@ -155,15 +156,16 @@ export const appRouter = router({
     }),
     lab: router({
       dashboard: protectedProcedure.query(async ({ ctx }) => {
-        const [objectives, collections, sources, evaluations, files, baseModelSelection] = await Promise.all([
+        const [objectives, collections, sources, evaluations, files, baseModelSelection, baseModelSelectionStoreReady] = await Promise.all([
           listModelObjectives(ctx.user.id),
           listKnowledgeCollections(ctx.user.id),
           listKnowledgeSources(ctx.user.id),
           listModelEvaluations(ctx.user.id),
           listFiles(ctx.user.id),
           getBaseModelSelection(ctx.user.id),
+          isBaseModelSelectionStoreReady(),
         ]);
-        return { objectives, collections, sources, evaluations, files, baseModelSelection };
+        return { objectives, collections, sources, evaluations, files, baseModelSelection, baseModelSelectionStoreReady };
       }),
       models: protectedProcedure.query(async () => {
         const catalog = await listLLMModels();
@@ -350,6 +352,7 @@ export const appRouter = router({
           primaryEvaluationId: z.string().min(1).optional(),
           fallbackEvaluationId: z.string().min(1).optional(),
         })).mutation(async ({ ctx, input }) => {
+          if (!await isBaseModelSelectionStoreReady()) throw new Error("مخزن قرار نموذج الأساس غير جاهز حالياً؛ لا يمكن حفظ المسودة.");
           if (input.fallbackModelId === input.primaryModelId) throw new Error("يجب أن يكون النموذج البديل مختلفاً عن النموذج الرئيسي.");
           const catalog = await listLLMModels();
           const available = new Set(catalog.data.map(item => item.id));

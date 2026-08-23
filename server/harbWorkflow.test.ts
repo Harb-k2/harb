@@ -29,6 +29,7 @@ const db = vi.hoisted(() => ({
   getCyberAsset: vi.fn(),
   getCyberOperation: vi.fn(),
   getKnowledgeSource: vi.fn(),
+  isBaseModelSelectionStoreReady: vi.fn(),
   listApprovals: vi.fn(),
   listAuditEntries: vi.fn(),
   listDesktopAgents: vi.fn(),
@@ -120,6 +121,7 @@ describe("Harb permission workflows", () => {
     db.createModelEvaluation.mockResolvedValue({ id: "evaluation-01" });
     db.completeModelEvaluation.mockResolvedValue({ id: "evaluation-01", modelId: "gpt-5", status: "completed", score: 92 });
     db.getBaseModelSelection.mockResolvedValue(undefined);
+    db.isBaseModelSelectionStoreReady.mockResolvedValue(true);
     db.saveBaseModelSelection.mockResolvedValue({ id: "base-model-01", primaryModelId: "gpt-5", fallbackModelId: "gpt-5-mini", status: "draft" });
     db.approveBaseModelSelection.mockResolvedValue({ id: "base-model-01", primaryModelId: "gpt-5", fallbackModelId: null, status: "approved" });
     db.listModelEvaluations.mockResolvedValue([]);

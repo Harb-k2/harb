@@ -401,6 +401,17 @@ export async function getBaseModelSelection(ownerId: number) {
   return rows[0];
 }
 
+export async function isBaseModelSelectionStoreReady() {
+  const db = await getDb();
+  if (!db) return false;
+  try {
+    await db.select({ id: baseModelSelections.id }).from(baseModelSelections).limit(1);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function saveBaseModelSelection(ownerId: number, values: Omit<typeof baseModelSelections.$inferInsert, "id" | "ownerId" | "createdAt" | "updatedAt">) {
   const db = await getDb();
   if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
