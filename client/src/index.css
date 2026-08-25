@@ -165,6 +165,31 @@
   .harb-chatbox {
     background: transparent;
   }
+  .harb-chatbox-drag-active {
+    outline: 2px solid oklch(0.8 0.135 173 / 74%);
+    outline-offset: -2px;
+  }
+  .harb-file-drop-overlay {
+    position: absolute;
+    z-index: 20;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    pointer-events: none;
+    background: oklch(0.1 0.018 246 / 72%);
+    backdrop-filter: blur(5px);
+  }
+  .harb-file-drop-card {
+    width: min(100%, 30rem);
+    border: 1px dashed oklch(0.8 0.135 173 / 70%);
+    border-radius: 1.25rem;
+    padding: 1.5rem;
+    text-align: center;
+    background: linear-gradient(145deg, oklch(0.16 0.028 190 / 96%), oklch(0.12 0.02 246 / 96%));
+    box-shadow: 0 20px 46px oklch(0 0 0 / 32%);
+  }
   .harb-chat-empty > div > div:first-child {
     border: 1px solid oklch(0.79 0.11 173 / 12%);
     background: oklch(0.79 0.11 173 / 6%);
@@ -201,6 +226,10 @@
     background: linear-gradient(135deg, oklch(0.12 0.02 246 / 96%), oklch(0.15 0.024 246 / 91%));
     box-shadow: 0 16px 38px oklch(0 0 0 / 23%), inset 0 1px 0 oklch(1 0 0 / 5%);
   }
+  .harb-file-drop-hint { background: oklch(0.14 0.018 246 / 46%); }
+  .harb-attachment-progress { background: linear-gradient(135deg, oklch(0.79 0.1 173 / 10%), oklch(0.13 0.02 246 / 84%)); }
+  .harb-progress-step { text-align: center; opacity: 0.48; }
+  .harb-progress-step-complete { color: var(--primary); font-weight: 600; opacity: 1; }
   .harb-security-notice {
     border-top: 1px solid oklch(0.82 0.025 246 / 8%);
     padding-top: 0.6rem;

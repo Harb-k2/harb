@@ -1,7 +1,8 @@
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { getAttachmentProgressDetails, type AttachmentUploadProgressDetails } from "@/lib/attachment-progress";
 import { cn } from "@/lib/utils";
-import { ArrowUp, FileText, Image, Loader2, Paperclip, Sparkles, ThumbsDown, ThumbsUp, User, X } from "lucide-react";
+import { ArrowUp, CheckCircle2, FileText, Image, Loader2, Paperclip, Sparkles, ThumbsDown, ThumbsUp, UploadCloud, User, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Streamdown } from "streamdown";
 
@@ -16,12 +17,7 @@ export type ChatAttachment = {
   previewUrl?: string;
 };
 
-export type AttachmentUploadProgress = {
-  stage: "preparing" | "uploading" | "extracting" | "ocr" | "ready";
-  current: number;
-  total: number;
-  fileName: string;
-};
+export type AttachmentUploadProgress = AttachmentUploadProgressDetails;
 
 export type Message = {
   id?: string;
@@ -73,10 +69,11 @@ export function AIChatBox({
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const dragDepthRef = useRef(0);
+  const [isFileDragActive, setIsFileDragActive] = useState(false);
   const displayMessages = messages.filter(message => message.role !== "system");
-  const progressStageLabel = attachmentProgress?.stage === "preparing" ? "يجري تجهيز المرفق" : attachmentProgress?.stage === "uploading" ? "يجري رفع المرفق بشكل خاص" : attachmentProgress?.stage === "extracting" ? "يجري استخراج النص والملخص" : attachmentProgress?.stage === "ocr" ? "يجري OCR للنص الظاهر" : "أصبح المرفق جاهزاً للتحليل";
-  const progressWithinStage = attachmentProgress?.stage === "preparing" ? 25 : attachmentProgress?.stage === "uploading" ? 70 : attachmentProgress?.stage === "extracting" ? 84 : attachmentProgress?.stage === "ocr" ? 92 : 100;
-  const attachmentProgressPercent = attachmentProgress ? Math.round((((attachmentProgress.current - 1) + progressWithinStage / 100) / attachmentProgress.total) * 100) : 0;
+  const progressDetails = attachmentProgress ? getAttachmentProgressDetails(attachmentProgress) : null;
+  const canSelectFiles = Boolean(onSelectFiles) && !isUploadingAttachments && !isLoading;
 
   const scrollToBottom = () => {
     const viewport = scrollAreaRef.current?.querySelector("[data-radix-scroll-area-viewport]") as HTMLDivElement | null;
@@ -105,12 +102,47 @@ export function AIChatBox({
 
   const handleFiles = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? []);
-    if (files.length) onSelectFiles?.(files);
+    if (files.length && canSelectFiles) onSelectFiles?.(files);
     event.target.value = "";
   };
 
+  const isFileDrag = (event: React.DragEvent) => Array.from(event.dataTransfer.types).includes("Files");
+  const openFilePicker = () => fileInputRef.current?.click();
+  const handleDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!isFileDrag(event)) return;
+    event.preventDefault();
+    dragDepthRef.current += 1;
+    if (canSelectFiles) setIsFileDragActive(true);
+  };
+  const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!isFileDrag(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = canSelectFiles ? "copy" : "none";
+  };
+  const handleDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!isFileDrag(event)) return;
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) setIsFileDragActive(false);
+  };
+  const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!isFileDrag(event)) return;
+    event.preventDefault();
+    dragDepthRef.current = 0;
+    setIsFileDragActive(false);
+    const files = Array.from(event.dataTransfer.files ?? []);
+    if (files.length && canSelectFiles) onSelectFiles?.(files);
+  };
+
   return (
-    <div className={cn("harb-chatbox flex min-h-0 flex-col bg-card text-card-foreground", className)} style={{ height }}>
+    <div
+      className={cn("harb-chatbox relative flex min-h-0 flex-col bg-card text-card-foreground", isFileDragActive && "harb-chatbox-drag-active", className)}
+      style={{ height }}
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {isFileDragActive && <div className="harb-file-drop-overlay" role="status" aria-live="polite"><div className="harb-file-drop-card"><UploadCloud className="size-7 text-primary" /><p className="mt-3 text-sm font-semibold text-foreground">أفلت المرفقات لإضافتها بشكل خاص</p><p className="mt-1 text-xs leading-5 text-muted-foreground">صور JPEG وPNG وWebP أو PDF حتى 8 MiB. سيستمر فحص قانون المالك قبل التحليل.</p></div></div>}
       <div ref={scrollAreaRef} className="flex-1 overflow-hidden">
         {displayMessages.length === 0 ? (
           <div className="harb-chat-empty flex h-full min-h-[360px] flex-col p-5 sm:p-8">
@@ -160,10 +192,11 @@ export function AIChatBox({
         )}
       </div>
       <form onSubmit={handleSubmit} className="harb-composer mx-3 mb-3 rounded-2xl border border-white/12 bg-[#0b121c]/85 p-2 shadow-[0_12px_32px_oklch(0_0_0_/_18%)] sm:mx-5 sm:mb-5">
-        {(pendingAttachments.length > 0 || isUploadingAttachments || attachmentProgress) && <div className="mb-2 border-b border-white/8 px-1 pb-2"><div className="flex flex-wrap gap-2">{pendingAttachments.map(attachment => <div key={attachment.id} className={cn("group relative overflow-hidden rounded-xl border", attachment.kind === "image" ? "h-16 w-16 border-primary/25 bg-primary/8" : "flex min-w-44 items-center gap-2 border-rose-300/20 bg-rose-400/5 px-2 py-2")} title={attachment.originalName}>{attachment.kind === "image" && attachment.previewUrl ? <img src={attachment.previewUrl} alt={`معاينة ${attachment.originalName}`} className="h-full w-full object-cover" /> : attachment.kind === "image" ? <span className="flex h-full w-full items-center justify-center text-primary"><Image className="size-5" /></span> : <><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-rose-400/12 text-rose-200"><FileText className="size-4" /></span><span className="min-w-0"><span className="block truncate text-[11px] font-medium text-foreground">{attachment.originalName}</span><span className="mt-0.5 block text-[9px] font-semibold tracking-wide text-rose-200">PDF</span></span></>}<button type="button" aria-label={`إزالة ${attachment.originalName}`} onClick={() => onRemoveAttachment?.(attachment.id)} className={cn("absolute flex h-5 w-5 items-center justify-center rounded-full border text-muted-foreground transition-colors hover:border-rose-300/40 hover:bg-rose-400/20 hover:text-rose-100", attachment.kind === "image" ? "left-1 top-1 border-black/25 bg-black/55" : "left-1.5 top-1.5 border-white/10 bg-black/20")}><X className="size-3" /></button></div>)}</div>{attachmentProgress ? <div className="mt-2 rounded-xl border border-primary/15 bg-primary/5 px-2.5 py-2" role="status" aria-live="polite"><div className="flex items-center justify-between gap-3 text-[11px]"><span className="flex min-w-0 items-center gap-1.5 text-foreground"><Loader2 className={cn("size-3.5 shrink-0 text-primary", attachmentProgress.stage === "ready" ? "" : "animate-spin")} /> <span className="truncate">{progressStageLabel}: {attachmentProgress.fileName}</span></span><span className="shrink-0 text-primary">{attachmentProgressPercent}%</span></div><div className="mt-1.5 flex items-center gap-2"><div className="h-1.5 flex-1 overflow-hidden rounded-full bg-black/25" role="progressbar" aria-label="تقدم رفع المرفق" aria-valuemin={0} aria-valuemax={100} aria-valuenow={attachmentProgressPercent}><div className="h-full rounded-full bg-primary transition-[width] duration-300 ease-out" style={{ width: `${attachmentProgressPercent}%` }} /></div>{attachmentProgress.stage !== "ready" && onCancelUpload ? <button type="button" onClick={onCancelUpload} className="shrink-0 rounded-lg border border-white/12 px-2 py-1 text-[10px] font-medium text-muted-foreground transition-colors hover:border-rose-300/30 hover:bg-rose-400/10 hover:text-rose-200">إلغاء</button> : null}</div></div> : isUploadingAttachments ? <span className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-white/5 px-2 py-1 text-[11px] text-muted-foreground"><Loader2 className="size-3 animate-spin text-primary" />يجري رفع المرفق…</span> : null}</div>}
+        {(pendingAttachments.length > 0 || isUploadingAttachments || attachmentProgress) && <div className="mb-2 border-b border-white/8 px-1 pb-2"><div className="flex flex-wrap gap-2">{pendingAttachments.map(attachment => <div key={attachment.id} className={cn("group relative overflow-hidden rounded-xl border", attachment.kind === "image" ? "h-16 w-16 border-primary/25 bg-primary/8" : "flex min-w-44 items-center gap-2 border-rose-300/20 bg-rose-400/5 px-2 py-2")} title={attachment.originalName}>{attachment.kind === "image" && attachment.previewUrl ? <img src={attachment.previewUrl} alt={`معاينة ${attachment.originalName}`} className="h-full w-full object-cover" /> : attachment.kind === "image" ? <span className="flex h-full w-full items-center justify-center text-primary"><Image className="size-5" /></span> : <><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-rose-400/12 text-rose-200"><FileText className="size-4" /></span><span className="min-w-0"><span className="block truncate text-[11px] font-medium text-foreground">{attachment.originalName}</span><span className="mt-0.5 block text-[9px] font-semibold tracking-wide text-rose-200">PDF</span></span></>}<button type="button" aria-label={`إزالة ${attachment.originalName}`} onClick={() => onRemoveAttachment?.(attachment.id)} className={cn("absolute flex h-5 w-5 items-center justify-center rounded-full border text-muted-foreground transition-colors hover:border-rose-300/40 hover:bg-rose-400/20 hover:text-rose-100", attachment.kind === "image" ? "left-1 top-1 border-black/25 bg-black/55" : "left-1.5 top-1.5 border-white/10 bg-black/20")}><X className="size-3" /></button></div>)}</div>{progressDetails ? <div className="harb-attachment-progress mt-2 rounded-xl border border-primary/15 bg-primary/5 px-3 py-2.5" role="status" aria-live="polite"><div className="flex items-center justify-between gap-3 text-[11px]"><span className="flex min-w-0 items-center gap-1.5 text-foreground">{attachmentProgress?.stage === "ready" ? <CheckCircle2 className="size-3.5 shrink-0 text-primary" /> : <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" />}<span className="truncate font-medium">{progressDetails.stageLabel}</span></span><span className="shrink-0 font-semibold text-primary">{progressDetails.percent}%</span></div><p className="mt-1 truncate text-[10px] text-muted-foreground">{attachmentProgress?.fileName} · المرفق {progressDetails.normalizedCurrent} من {progressDetails.normalizedTotal}</p><div className="mt-2 flex items-center gap-2"><div className="h-1.5 flex-1 overflow-hidden rounded-full bg-black/25" role="progressbar" aria-label="تقدم رفع المرفق" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progressDetails.percent}><div className="h-full rounded-full bg-primary transition-[width] duration-300 ease-out" style={{ width: `${progressDetails.percent}%` }} /></div>{attachmentProgress?.stage !== "ready" && onCancelUpload ? <button type="button" onClick={onCancelUpload} className="shrink-0 rounded-lg border border-white/12 px-2 py-1 text-[10px] font-medium text-muted-foreground transition-colors hover:border-rose-300/30 hover:bg-rose-400/10 hover:text-rose-200">إلغاء</button> : null}</div><div className="mt-2 grid grid-cols-4 gap-1 text-[9px] text-muted-foreground"><span className={cn("harb-progress-step", progressDetails.pipelineStep >= 0 && "harb-progress-step-complete")}>تجهيز</span><span className={cn("harb-progress-step", progressDetails.pipelineStep >= 1 && "harb-progress-step-complete")}>رفع خاص</span><span className={cn("harb-progress-step", progressDetails.pipelineStep >= 2 && "harb-progress-step-complete")}>تحليل</span><span className={cn("harb-progress-step", progressDetails.pipelineStep >= 3 && "harb-progress-step-complete")}>جاهز</span></div></div> : isUploadingAttachments ? <span className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-white/5 px-2 py-1 text-[11px] text-muted-foreground"><Loader2 className="size-3 animate-spin text-primary" />يجري رفع المرفق…</span> : null}</div>}
+        {!pendingAttachments.length && !isUploadingAttachments && !attachmentProgress && <button type="button" onClick={openFilePicker} disabled={!canSelectFiles} className="harb-file-drop-hint mb-2 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-white/12 px-3 py-2 text-[11px] text-muted-foreground transition-colors hover:border-primary/35 hover:bg-primary/5 hover:text-primary disabled:cursor-not-allowed disabled:opacity-45"><UploadCloud className="size-3.5" />اسحب ملفاتك هنا أو اضغط لاختيارها <span className="text-muted-foreground/75">JPEG، PNG، WebP، PDF · حتى 8 MiB</span></button>}
         <div className="flex items-end gap-2">
           <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/webp,application/pdf" multiple style={{ display: "none" }} onChange={handleFiles} />
-          <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isLoading || isUploadingAttachments || !onSelectFiles} aria-label="إرفاق صورة أو ملف PDF" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-white/8 hover:text-primary disabled:cursor-not-allowed disabled:opacity-40"><Paperclip className="size-4" /></button>
+          <button type="button" onClick={openFilePicker} disabled={!canSelectFiles} aria-label="إرفاق صورة أو ملف PDF" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-white/8 hover:text-primary disabled:cursor-not-allowed disabled:opacity-40"><Paperclip className="size-4" /></button>
           <Textarea ref={textareaRef} value={input} onChange={event => setInput(event.target.value)} onKeyDown={handleKeyDown} placeholder={placeholder} className="min-h-11 flex-1 resize-none border-0 bg-transparent px-3 py-2.5 text-sm shadow-none focus-visible:ring-0" rows={1} aria-label="رسالة إلى Harb" />
           <button type="submit" disabled={!input.trim() || isLoading || isUploadingAttachments} aria-label="إرسال الرسالة" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground transition-transform duration-150 hover:bg-primary/90 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40">
             {isLoading ? <Loader2 className="size-4 animate-spin" /> : <ArrowUp className="size-5" />}
