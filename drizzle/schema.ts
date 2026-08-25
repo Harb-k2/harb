@@ -223,6 +223,21 @@ export const conversationMessages = mysqlTable("conversation_messages", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
+export const conversationAttachments = mysqlTable("conversation_attachments", {
+  id: varchar("id", { length: 48 }).primaryKey(),
+  ownerId: int("ownerId").notNull(),
+  conversationId: varchar("conversationId", { length: 48 }).notNull(),
+  messageId: varchar("messageId", { length: 48 }),
+  originalName: varchar("originalName", { length: 320 }).notNull(),
+  mimeType: varchar("mimeType", { length: 160 }).notNull(),
+  size: int("size").notNull(),
+  storageKey: varchar("storageKey", { length: 700 }).notNull(),
+  storageUrl: varchar("storageUrl", { length: 1024 }).notNull(),
+  kind: mysqlEnum("kind", ["image", "document"]).notNull(),
+  analysisStatus: mysqlEnum("analysisStatus", ["ready", "unsupported", "failed"]).default("ready").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
 export const messageFeedback = mysqlTable("message_feedback", {
   id: varchar("id", { length: 48 }).primaryKey(),
   ownerId: int("ownerId").notNull(),
@@ -322,6 +337,7 @@ export type ModelEvaluation = typeof modelEvaluations.$inferSelect;
 export type BaseModelSelection = typeof baseModelSelections.$inferSelect;
 export type Conversation = typeof conversations.$inferSelect;
 export type ConversationMessage = typeof conversationMessages.$inferSelect;
+export type ConversationAttachment = typeof conversationAttachments.$inferSelect;
 export type MessageFeedback = typeof messageFeedback.$inferSelect;
 export type BenchmarkCase = typeof benchmarkCases.$inferSelect;
 export type BenchmarkRun = typeof benchmarkRuns.$inferSelect;

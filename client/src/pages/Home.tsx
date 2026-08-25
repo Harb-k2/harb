@@ -1,5 +1,5 @@
 import { useAuth } from "@/_core/hooks/useAuth";
-import { AIChatBox, type Message } from "@/components/AIChatBox";
+import { AIChatBox, type ChatAttachment, type Message } from "@/components/AIChatBox";
 import { HarbAssistantWorkspace, type ResponseMode } from "@/components/HarbAssistantWorkspace";
 import { CyberOperationsPanel } from "@/components/CyberOperationsPanel";
 import { ModelLabPanel } from "@/components/ModelLabPanel";
@@ -104,6 +104,19 @@ function formatBytes(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} ميغابايت`;
 }
 
+function fileToBase64(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("تعذر قراءة الملف."));
+    reader.onload = () => {
+      const base64 = String(reader.result).split(",")[1];
+      if (base64) resolve(base64);
+      else reject(new Error("تعذر تحويل الملف."));
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 function classificationLabel(value: "private" | "restricted" | "shared") {
   return value === "private" ? "خاص" : value === "restricted" ? "مقيّد" : "مشترك";
 }
@@ -206,6 +219,8 @@ export default function Home() {
   const [workspace, setWorkspace] = useState<"assistant" | "control">("assistant");
   const [responseMode, setResponseMode] = useState<ResponseMode>("balanced");
   const [activeConversationId, setActiveConversationId] = useState<string | undefined>();
+  const [pendingAttachments, setPendingAttachments] = useState<ChatAttachment[]>([]);
+  const [isUploadingChatAttachments, setIsUploadingChatAttachments] = useState(false);
   const [auditSearch, setAuditSearch] = useState("");
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -218,13 +233,21 @@ export default function Home() {
 
   useEffect(() => {
     if (!activeConversation.data) return;
-    setMessages(activeConversation.data.messages.map(message => ({ id: message.id, role: message.role, content: message.content })));
+    const attachmentsByMessage = new Map<string, ChatAttachment[]>();
+    activeConversation.data.attachments.forEach(attachment => {
+      if (!attachment.messageId) return;
+      const items = attachmentsByMessage.get(attachment.messageId) ?? [];
+      items.push(attachment);
+      attachmentsByMessage.set(attachment.messageId, items);
+    });
+    setMessages(activeConversation.data.messages.map(message => ({ id: message.id, role: message.role, content: message.content, attachments: attachmentsByMessage.get(message.id) })));
   }, [activeConversation.data]);
 
   const submitTask = trpc.harb.tasks.submit.useMutation({
     onSuccess: result => {
       setActiveConversationId(result.conversationId);
-      setMessages(current => [...current.filter(message => Boolean(message.id)), { id: result.userMessage.id, role: "user", content: result.userMessage.content }, { id: result.assistantMessage.id, role: "assistant", content: result.message }]);
+      setMessages(current => [...current.filter(message => Boolean(message.id)), { id: result.userMessage.id, role: "user", content: result.userMessage.content, attachments: result.attachments }, { id: result.assistantMessage.id, role: "assistant", content: result.message }]);
+      setPendingAttachments([]);
       void utils.harb.conversations.list.invalidate();
       void utils.harb.conversations.get.invalidate();
       refresh();
@@ -232,13 +255,14 @@ export default function Home() {
     onError: error => setMessages(current => [...current, { role: "assistant", content: `**تعذر إكمال الطلب.**\n\n${error.message}` }]),
   });
   const createConversation = trpc.harb.conversations.create.useMutation({
-    onSuccess: conversation => { setActiveConversationId(conversation.id); setMessages([]); void utils.harb.conversations.list.invalidate(); },
+    onSuccess: conversation => { setActiveConversationId(conversation.id); setMessages([]); setPendingAttachments([]); void utils.harb.conversations.list.invalidate(); },
     onError: error => toast.error(error.message),
   });
   const rateMessage = trpc.harb.conversations.feedback.useMutation({
     onSuccess: () => { toast.success("تم تسجيل تقييمك لتحسين مراجعة الردود."); void utils.harb.conversations.get.invalidate(); },
     onError: error => toast.error(error.message),
   });
+  const uploadConversationAttachment = trpc.harb.conversations.attachments.upload.useMutation({ onError: error => toast.error(error.message) });
   const createRule = trpc.harb.rules.create.useMutation({ onSuccess: () => { toast.success("تمت إضافة القاعدة."); refresh(); }, onError: error => toast.error(error.message) });
   const updateRule = trpc.harb.rules.update.useMutation({ onSuccess: () => { toast.success("تم تحديث القانون."); refresh(); }, onError: error => toast.error(error.message) });
   const resolveApproval = trpc.harb.approvals.resolve.useMutation({ onSuccess: () => { toast.success("تم تسجيل القرار في سجل التدقيق."); refresh(); }, onError: error => toast.error(error.message) });
@@ -254,8 +278,35 @@ export default function Home() {
       .filter(message => message.role === "user" || message.role === "assistant")
       .slice(-8)
       .map(message => ({ role: message.role as "user" | "assistant", content: message.content }));
-    setMessages(current => [...current, { role: "user", content: request }]);
-    submitTask.mutate({ request, responseMode, conversationId: activeConversationId, conversation });
+    setMessages(current => [...current, { role: "user", content: request, attachments: pendingAttachments }]);
+    submitTask.mutate({ request, responseMode, conversationId: activeConversationId, attachmentIds: pendingAttachments.map(attachment => attachment.id), conversation });
+  };
+  const handleChatAttachments = async (files: File[]) => {
+    const allowedMimeTypes = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
+    const remaining = 3 - pendingAttachments.length;
+    if (!remaining) return toast.error("يمكن إرفاق ثلاثة عناصر كحد أقصى مع الرسالة الواحدة.");
+    const selected = files.slice(0, remaining);
+    if (files.length > selected.length) toast.error("احتُفظ بأول ثلاثة مرفقات فقط.");
+    if (selected.some(file => !allowedMimeTypes.has(file.type))) return toast.error("يدعم صندوق المحادثة صور JPEG وPNG وWebP وملفات PDF فقط.");
+    if (selected.some(file => file.size > 8 * 1024 * 1024)) return toast.error("الحد الأقصى للمرفق الواحد هو 8 ميغابايت.");
+    setIsUploadingChatAttachments(true);
+    try {
+      let conversationId = activeConversationId;
+      if (!conversationId) {
+        const conversation = await createConversation.mutateAsync({ title: "محادثة جديدة" });
+        conversationId = conversation.id;
+      }
+      for (const file of selected) {
+        const attachment = await uploadConversationAttachment.mutateAsync({ conversationId, name: file.name, mimeType: file.type, base64: await fileToBase64(file) });
+        setPendingAttachments(current => [...current, attachment]);
+      }
+      void utils.harb.conversations.get.invalidate();
+      void utils.harb.conversations.list.invalidate();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "تعذر رفع المرفق.");
+    } finally {
+      setIsUploadingChatAttachments(false);
+    }
   };
   const handleUpload = (file?: File) => {
     if (!file) return;
@@ -309,11 +360,15 @@ export default function Home() {
       conversations={conversations.data ?? []}
       activeConversationId={activeConversationId}
       feedbackByMessage={feedbackByMessage}
-      onSelectConversation={conversationId => { setActiveConversationId(conversationId); setMessages([]); }}
+      onSelectConversation={conversationId => { setActiveConversationId(conversationId); setMessages([]); setPendingAttachments([]); }}
       onRateMessage={(messageId, rating) => {
         if (!activeConversationId) return;
         rateMessage.mutate({ messageId, conversationId: activeConversationId, rating });
       }}
+      pendingAttachments={pendingAttachments}
+      isUploadingAttachments={isUploadingChatAttachments}
+      onSelectFiles={files => { void handleChatAttachments(files); }}
+      onRemoveAttachment={attachmentId => setPendingAttachments(current => current.filter(attachment => attachment.id !== attachmentId))}
     />;
   }
 

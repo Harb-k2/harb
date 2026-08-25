@@ -13,6 +13,7 @@ const db = vi.hoisted(() => ({
   createBenchmarkResult: vi.fn(),
   createBenchmarkRun: vi.fn(),
   createConversation: vi.fn(),
+  createConversationAttachment: vi.fn(),
   createConversationMessage: vi.fn(),
   createCyberAsset: vi.fn(),
   createCyberOperation: vi.fn(),
@@ -32,6 +33,7 @@ const db = vi.hoisted(() => ({
   findDesktopPairing: vi.fn(),
   getBaseModelSelection: vi.fn(),
   getConversation: vi.fn(),
+  getConversationAttachmentsByIds: vi.fn(),
   getDesktopAgentById: vi.fn(),
   getCyberAsset: vi.fn(),
   getCyberOperation: vi.fn(),
@@ -42,6 +44,7 @@ const db = vi.hoisted(() => ({
   listBenchmarkResults: vi.fn(),
   listBenchmarkRuns: vi.fn(),
   listConversationMessages: vi.fn(),
+  listConversationAttachments: vi.fn(),
   listConversations: vi.fn(),
   listMessageFeedback: vi.fn(),
   listAuditEntries: vi.fn(),
@@ -72,6 +75,7 @@ const db = vi.hoisted(() => ({
   updateRule: vi.fn(),
   updateWorkspaceFile: vi.fn(),
   updateTask: vi.fn(),
+  linkConversationAttachmentsToMessage: vi.fn(),
   upsertMessageFeedback: vi.fn(),
   reviewBenchmarkResult: vi.fn(),
 }));
@@ -79,6 +83,8 @@ const db = vi.hoisted(() => ({
 vi.mock("./db", () => db);
 const llm = vi.hoisted(() => ({ invokeLLM: vi.fn(), listLLMModels: vi.fn() }));
 vi.mock("./_core/llm", () => llm);
+const storage = vi.hoisted(() => ({ storagePut: vi.fn(), storageGetSignedUrl: vi.fn() }));
+vi.mock("./storage", () => storage);
 const knowledgeIndex = vi.hoisted(() => ({ indexKnowledgeStorageObject: vi.fn() }));
 vi.mock("./knowledgeIndex", () => knowledgeIndex);
 
@@ -108,8 +114,11 @@ describe("Harb permission workflows", () => {
     db.listRules.mockResolvedValue([]);
     db.createTask.mockResolvedValue({ id: "task-01" });
     db.createConversation.mockResolvedValue({ id: "conversation-01", title: "محادثة جديدة", detectedLanguage: "auto" });
+    db.createConversationAttachment.mockResolvedValue({ id: "attachment-01", conversationId: "conversation-01", originalName: "evidence.png", mimeType: "image/png", size: 120, storageKey: "owners/7/conversations/conversation-01/evidence.png", storageUrl: "/manus-storage/evidence.png", kind: "image", analysisStatus: "ready" });
     db.createConversationMessage.mockResolvedValue({ id: "message-01" });
+    db.getConversationAttachmentsByIds.mockResolvedValue([]);
     db.listConversationMessages.mockResolvedValue([]);
+    db.listConversationAttachments.mockResolvedValue([]);
     db.listConversations.mockResolvedValue([]);
     db.listMessageFeedback.mockResolvedValue([]);
     db.createBenchmarkCase.mockResolvedValue({ id: "benchmark-case-01", title: "حالة معيارية" });
@@ -158,6 +167,8 @@ describe("Harb permission workflows", () => {
     db.searchKnowledgeChunks.mockResolvedValue([]);
     llm.listLLMModels.mockResolvedValue({ data: [{ id: "gpt-5" }, { id: "gpt-5-mini" }] });
     llm.invokeLLM.mockResolvedValue({ choices: [{ message: { content: "تحليل آمن ومقيد بالتفويض." } }] });
+    storage.storagePut.mockResolvedValue({ key: "owners/7/conversations/conversation-01/evidence.png", url: "/manus-storage/evidence.png" });
+    storage.storageGetSignedUrl.mockResolvedValue("https://signed.example/evidence.png");
     db.getKnowledgeSource.mockResolvedValue({ id: "source-01", collectionId: "collection-01", sourceType: "workspace_file", storageKey: "owner/notes.txt", mimeType: "text/plain" });
     db.getDesktopAgentById.mockResolvedValue({ id: "agent-01", ownerId: 7, agentTokenHash: desktopTokenHash, status: "online", scopes: "read_files,run_commands" });
     knowledgeIndex.indexKnowledgeStorageObject.mockResolvedValue({ status: "ready", chunks: [{ excerpt: "تفويض الأصل قبل أي اختبار.", contentHash: "hash-01" }] });
@@ -190,6 +201,30 @@ describe("Harb permission workflows", () => {
     expect(db.createConversation).toHaveBeenCalledWith(7, expect.objectContaining({ detectedLanguage: "latin" }));
     expect(db.createConversationMessage).toHaveBeenCalledWith(7, expect.objectContaining({ role: "user", language: "latin" }));
     expect(llm.invokeLLM).toHaveBeenCalledWith(expect.objectContaining({ messages: expect.arrayContaining([expect.objectContaining({ role: "system", content: expect.stringContaining("Respond in the same language") })]) }));
+  });
+
+  it("يرفع مرفق محادثة خاصاً بصيغة مدعومة ويكتب أثراً مدققاً", async () => {
+    db.getConversation.mockResolvedValue({ id: "conversation-01", title: "محادثة جديدة", detectedLanguage: "arabic" });
+
+    const result = await appRouter.createCaller(createContext()).harb.conversations.attachments.upload({ conversationId: "conversation-01", name: "evidence.png", mimeType: "image/png", base64: "aGVsbG8=" });
+
+    expect(result).toEqual(expect.objectContaining({ id: "attachment-01", kind: "image" }));
+    expect(storage.storagePut).toHaveBeenCalledWith(expect.stringContaining("owners/7/conversations/conversation-01"), expect.any(Buffer), "image/png");
+    expect(db.createConversationAttachment).toHaveBeenCalledWith(7, expect.objectContaining({ conversationId: "conversation-01", analysisStatus: "ready" }));
+    expect(db.createAuditEntry).toHaveBeenCalledWith(7, expect.objectContaining({ eventType: "conversation.attachment_uploaded" }));
+  });
+
+  it("يربط الصورة المرفقة برسالة المالك ويمرر رابطها الموقّع إلى النموذج", async () => {
+    const attachment = { id: "attachment-01", conversationId: "conversation-01", originalName: "evidence.png", mimeType: "image/png", size: 120, storageKey: "owners/7/conversations/conversation-01/evidence.png", storageUrl: "/manus-storage/evidence.png", kind: "image", analysisStatus: "ready" };
+    db.getConversation.mockResolvedValue({ id: "conversation-01", title: "محادثة جديدة", detectedLanguage: "arabic" });
+    db.getConversationAttachmentsByIds.mockResolvedValue([attachment]);
+
+    const result = await appRouter.createCaller(createContext()).harb.tasks.submit({ request: "حلل الصورة المرفقة ضمن التفويض", conversationId: "conversation-01", attachmentIds: ["attachment-01"] });
+
+    expect(result.decision).toBe("allow");
+    expect(db.linkConversationAttachmentsToMessage).toHaveBeenCalledWith(7, "conversation-01", ["attachment-01"], "message-01");
+    expect(storage.storageGetSignedUrl).toHaveBeenCalledWith(attachment.storageKey);
+    expect(llm.invokeLLM).toHaveBeenCalledWith(expect.objectContaining({ messages: expect.arrayContaining([expect.objectContaining({ role: "user", content: expect.arrayContaining([expect.objectContaining({ type: "image_url", image_url: expect.objectContaining({ url: "https://signed.example/evidence.png" }) })]) })]) }));
   });
 
   it("يسجل تقييم المالك لرد محفوظ داخل محادثته فقط", async () => {

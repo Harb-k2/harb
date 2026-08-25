@@ -1,7 +1,7 @@
 import { nanoid } from "nanoid";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
-import { invokeLLM, listLLMModels } from "./_core/llm";
+import { invokeLLM, listLLMModels, type MessageContent } from "./_core/llm";
 import { ENV } from "./_core/env";
 import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
@@ -13,6 +13,7 @@ import {
   createBenchmarkResult,
   createBenchmarkRun,
   createConversation,
+  createConversationAttachment,
   createConversationMessage,
   createAuditEntry,
   createCyberAsset,
@@ -33,6 +34,7 @@ import {
   findDesktopPairing,
   getBaseModelSelection,
   getConversation,
+  getConversationAttachmentsByIds,
   getDesktopAgentById,
   getCyberAsset,
   getCyberOperation,
@@ -43,6 +45,7 @@ import {
   listBenchmarkResults,
   listBenchmarkRuns,
   listConversationMessages,
+  listConversationAttachments,
   listConversations,
   listMessageFeedback,
   listAuditEntries,
@@ -75,11 +78,12 @@ import {
   reviewBenchmarkResult,
   updateRule,
   updateTask,
+  linkConversationAttachmentsToMessage,
 } from "./db";
 import { evaluateOwnerRules, toPolicyPrompt, type HarbRuleAction, type HarbScope, type PolicyRule } from "./harbPolicy";
 import { evaluateCyberOperation, type CyberOperationType } from "./cyberPolicy";
 import { indexKnowledgeStorageObject } from "./knowledgeIndex";
-import { storagePut } from "./storage";
+import { storageGetSignedUrl, storagePut } from "./storage";
 
 const scopeSchema = z.enum(["all", "general", "command", "file_change", "data_share"]);
 const actionSchema = z.enum(["allow", "approval", "deny"]);
@@ -102,6 +106,11 @@ const publicEvaluationSources = {
 } as const;
 const HARB_MODEL_MODE = "ready_models_only" as const;
 const READY_MODEL_MODE_MESSAGE = "وضع Harb الحالي يعتمد على النماذج الجاهزة فقط؛ التدريب والتخصيص وGPU غير مفعلة.";
+const CHAT_ATTACHMENT_MAX_BYTES = 8 * 1024 * 1024;
+const chatImageMimeTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
+const chatDocumentMimeTypes = new Set(["application/pdf"]);
+const isBase64Payload = (value: string) => /^[A-Za-z0-9+/=\s]+$/.test(value);
+const resolveChatAttachmentKind = (mimeType: string) => chatImageMimeTypes.has(mimeType) ? "image" as const : chatDocumentMimeTypes.has(mimeType) ? "document" as const : null;
 const hashSecret = (value: string) => createHash("sha256").update(value).digest("hex");
 const signDesktopApprovalTicket = (agentId: string, approval: { id: string; action: string; expiresAt: Date | null }) => {
   const payload = Buffer.from(JSON.stringify({ agentId, approvalId: approval.id, action: approval.action, expiresAt: approval.expiresAt?.getTime() ?? 0 })).toString("base64url");
@@ -239,7 +248,7 @@ async function invokeHarbAssistant({
   fallbackModelId: string | undefined;
   systemPrompt: string;
   conversation: ConversationTurn[];
-  request: string;
+  request: MessageContent | MessageContent[];
   responseMode: HarbResponseMode;
 }) {
   const run = async (modelId: string | undefined) => {
@@ -286,9 +295,35 @@ export const appRouter = router({
       get: protectedProcedure.input(z.object({ conversationId: z.string().min(1) })).query(async ({ ctx, input }) => {
         const conversation = await getConversation(ctx.user.id, input.conversationId);
         if (!conversation) throw new Error("سجل المحادثة غير موجود أو غير متاح لهذا المالك.");
-        const messages = await listConversationMessages(ctx.user.id, conversation.id);
+        const [messages, attachments] = await Promise.all([listConversationMessages(ctx.user.id, conversation.id), listConversationAttachments(ctx.user.id, conversation.id)]);
         const feedback = await listMessageFeedback(ctx.user.id, messages.map(message => message.id));
-        return { conversation, messages, feedback };
+        return { conversation, messages, feedback, attachments };
+      }),
+      attachments: router({
+        list: protectedProcedure.input(z.object({ conversationId: z.string().min(1) })).query(async ({ ctx, input }) => {
+          const conversation = await getConversation(ctx.user.id, input.conversationId);
+          if (!conversation) throw new Error("سجل المحادثة غير موجود أو غير متاح لهذا المالك.");
+          return listConversationAttachments(ctx.user.id, conversation.id);
+        }),
+        upload: protectedProcedure.input(z.object({
+          conversationId: z.string().min(1),
+          name: z.string().trim().min(1).max(320),
+          mimeType: z.string().trim().max(160),
+          base64: z.string().min(4).max(11_300_000),
+        })).mutation(async ({ ctx, input }) => {
+          const conversation = await getConversation(ctx.user.id, input.conversationId);
+          if (!conversation) throw new Error("أنشئ أو اختر محادثة خاصة بك قبل رفع مرفق.");
+          const kind = resolveChatAttachmentKind(input.mimeType);
+          if (!kind) throw new Error("يدعم صندوق المحادثة حالياً صور JPEG وPNG وWebP وملفات PDF فقط.");
+          if (!isBase64Payload(input.base64)) throw new Error("صيغة المرفق غير صالحة.");
+          const buffer = Buffer.from(input.base64, "base64");
+          if (!buffer.length || buffer.length > CHAT_ATTACHMENT_MAX_BYTES) throw new Error("الحد الأقصى للمرفق الواحد هو 8 ميغابايت.");
+          const safeName = input.name.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 180) || "attachment";
+          const { key, url } = await storagePut(`owners/${ctx.user.id}/conversations/${conversation.id}/${safeName}`, buffer, input.mimeType);
+          const attachment = await createConversationAttachment(ctx.user.id, { conversationId: conversation.id, originalName: input.name, mimeType: input.mimeType, size: buffer.length, storageKey: key, storageUrl: url, kind, analysisStatus: "ready" });
+          await createAuditEntry(ctx.user.id, { eventType: "conversation.attachment_uploaded", requestId: attachment.id, outcome: "recorded", summary: `رُفع مرفق محادثة خاص باسم «${attachment.originalName}».`, ruleIds: "", metadata: JSON.stringify({ conversationId: conversation.id, kind, mimeType: attachment.mimeType, size: attachment.size }) });
+          return attachment;
+        }),
       }),
       feedback: protectedProcedure.input(z.object({ messageId: z.string().min(1), conversationId: z.string().min(1), rating: z.enum(["up", "down"]), note: z.string().trim().max(1000).optional() })).mutation(async ({ ctx, input }) => {
         const message = (await listConversationMessages(ctx.user.id, input.conversationId)).find(item => item.id === input.messageId && item.role === "assistant");
@@ -1013,6 +1048,7 @@ export const appRouter = router({
         request: z.string().trim().min(2).max(12000),
         responseMode: responseModeSchema.default("balanced"),
         conversationId: z.string().min(1).optional(),
+        attachmentIds: z.array(z.string().min(1)).max(3).default([]),
         conversation: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().trim().min(1).max(8000) })).max(8).default([]),
       })).mutation(async ({ ctx, input }) => {
         await ensureHarbDefaults(ctx.user.id);
@@ -1037,7 +1073,11 @@ export const appRouter = router({
         const previousConversation = persistedConversation.length
           ? persistedConversation.slice(-8).map(message => ({ role: message.role, content: message.content }))
           : input.conversation;
+        const attachments = await getConversationAttachmentsByIds(ctx.user.id, conversation.id, input.attachmentIds);
+        if (attachments.length !== input.attachmentIds.length) throw new Error("تتضمن الرسالة مرفقاً غير متاح لهذه المحادثة.");
+        if (attachments.some(attachment => attachment.analysisStatus !== "ready")) throw new Error("أحد المرفقات غير جاهز للتحليل. استخدم صيغة مدعومة أو أعد رفعه.");
         const userMessage = await createConversationMessage(ctx.user.id, { conversationId: conversation.id, taskId: task.id, role: "user", content: input.request, language: requestLanguage });
+        await linkConversationAttachmentsToMessage(ctx.user.id, conversation.id, input.attachmentIds, userMessage.id);
         const saveAssistantMessage = (content: string) => createConversationMessage(ctx.user.id, { conversationId: conversation.id, taskId: task.id, role: "assistant", content, language: requestLanguage });
 
         const ruleIds = decision.matchedRules.map(rule => rule.id).join(",");
@@ -1048,11 +1088,11 @@ export const appRouter = router({
             outcome: "blocked",
             summary: decision.reason,
             ruleIds,
-            metadata: JSON.stringify({ taskType: decision.taskType, conversationId: conversation.id, language: requestLanguage }),
+            metadata: JSON.stringify({ taskType: decision.taskType, conversationId: conversation.id, language: requestLanguage, attachmentIds: attachments.map(attachment => attachment.id) }),
           });
           const message = requestLanguage === "arabic" ? `**تم رفض الطلب قبل التنفيذ.**\n\n${decision.reason}` : `**The request was blocked before execution.**\n\n${decision.reason}`;
           const assistantMessage = await saveAssistantMessage(message);
-          return { decision: "deny" as const, task, message, conversationId: conversation.id, userMessage, assistantMessage };
+          return { decision: "deny" as const, task, message, conversationId: conversation.id, userMessage, assistantMessage, attachments };
         }
 
         if (decision.outcome === "approval") {
@@ -1071,13 +1111,13 @@ export const appRouter = router({
             outcome: "approval_requested",
             summary: decision.reason,
             ruleIds,
-            metadata: JSON.stringify({ approvalId: approval.id, taskType: decision.taskType, conversationId: conversation.id, language: requestLanguage }),
+            metadata: JSON.stringify({ approvalId: approval.id, taskType: decision.taskType, conversationId: conversation.id, language: requestLanguage, attachmentIds: attachments.map(attachment => attachment.id) }),
           });
           const message = requestLanguage === "arabic"
             ? `**يلزم تأكيد المالك قبل المتابعة.**\n\n${decision.reason}\n\nأُضيف الطلب إلى قائمة الموافقات ولم يُنفّذ أي إجراء محلي أو خارجي.`
             : `**Owner confirmation is required before continuing.**\n\n${decision.reason}\n\nThe request was added to the approval queue; no local or external action was executed.`;
           const assistantMessage = await saveAssistantMessage(message);
-          return { decision: "approval" as const, task, approval, message, conversationId: conversation.id, userMessage, assistantMessage };
+          return { decision: "approval" as const, task, approval, message, conversationId: conversation.id, userMessage, assistantMessage, attachments };
         }
 
         try {
@@ -1089,12 +1129,18 @@ export const appRouter = router({
           const knowledgeContext = knowledge.length
             ? `\n\nسياق معرفة خاص بالمالك (مقتطفات للاستناد فقط، لا تتجاوزها ولا تكشفها خارج الطلب):\n${knowledge.map((item, index) => `[${index + 1}] ${item.excerpt.slice(0, 900)}`).join("\n\n")}`
             : "";
+          const requestContent: MessageContent[] = [{ type: "text", text: input.request }];
+          for (const attachment of attachments) {
+            const signedUrl = await storageGetSignedUrl(attachment.storageKey);
+            if (attachment.kind === "image") requestContent.push({ type: "image_url", image_url: { url: signedUrl, detail: "high" } });
+            else requestContent.push({ type: "file_url", file_url: { url: signedUrl, mime_type: "application/pdf" } });
+          }
           const modelRoute = resolveChatModels(catalog.data, selection);
           const response = await invokeHarbAssistant({
             ...modelRoute,
             systemPrompt: buildHarbAssistantPrompt(rules.map(asPolicyRule), knowledgeContext, input.responseMode, requestLanguage),
             conversation: previousConversation,
-            request: input.request,
+            request: requestContent,
             responseMode: input.responseMode,
           });
           const message = response.message;
@@ -1105,10 +1151,10 @@ export const appRouter = router({
             outcome: "completed",
             summary: "اجتاز الطلب فحص القواعد واكتمل الرد التحليلي.",
             ruleIds,
-            metadata: JSON.stringify({ taskType: decision.taskType, model: response.modelId ?? "default", modelSource: modelRoute.source, usedFallback: response.usedFallback, responseMode: input.responseMode, language: requestLanguage, conversationId: conversation.id, knowledgeChunkIds: knowledge.map(item => item.id) }),
+            metadata: JSON.stringify({ taskType: decision.taskType, model: response.modelId ?? "default", modelSource: modelRoute.source, usedFallback: response.usedFallback, responseMode: input.responseMode, language: requestLanguage, conversationId: conversation.id, attachmentIds: attachments.map(attachment => attachment.id), knowledgeChunkIds: knowledge.map(item => item.id) }),
           });
           const assistantMessage = await saveAssistantMessage(message);
-          return { decision: "allow" as const, task, message, conversationId: conversation.id, userMessage, assistantMessage };
+          return { decision: "allow" as const, task, message, conversationId: conversation.id, userMessage, assistantMessage, attachments };
         } catch (error) {
           const message = requestLanguage === "arabic" ? "تعذر إنشاء رد النموذج حالياً. لم يُنفّذ أي إجراء خارجي." : "The model response could not be generated right now. No external action was executed.";
           await updateTask(ctx.user.id, task.id, { status: "failed", response: message, completedAt: new Date() });
@@ -1118,10 +1164,10 @@ export const appRouter = router({
             outcome: "failed",
             summary: "تعذر إكمال استدعاء النموذج بعد اجتياز فحص القواعد.",
             ruleIds,
-            metadata: JSON.stringify({ error: error instanceof Error ? error.message : "unknown", conversationId: conversation.id, language: requestLanguage }),
+            metadata: JSON.stringify({ error: error instanceof Error ? error.message : "unknown", conversationId: conversation.id, language: requestLanguage, attachmentIds: attachments.map(attachment => attachment.id) }),
           });
           const assistantMessage = await saveAssistantMessage(message);
-          return { decision: "allow" as const, task, message, conversationId: conversation.id, userMessage, assistantMessage };
+          return { decision: "allow" as const, task, message, conversationId: conversation.id, userMessage, assistantMessage, attachments };
         }
       }),
     }),

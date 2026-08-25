@@ -8,6 +8,7 @@ import {
   benchmarkCases,
   benchmarkResults,
   benchmarkRuns,
+  conversationAttachments,
   conversationMessages,
   conversations,
   cyberAssets,
@@ -480,6 +481,35 @@ export async function createConversationMessage(ownerId: number, values: Omit<ty
   const record = { id: nanoid(), ownerId, ...values };
   await db.insert(conversationMessages).values(record);
   return record;
+}
+
+export async function createConversationAttachment(ownerId: number, values: Omit<typeof conversationAttachments.$inferInsert, "id" | "ownerId" | "createdAt" | "messageId">) {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  const record = { id: nanoid(), ownerId, messageId: null, ...values };
+  await db.insert(conversationAttachments).values(record);
+  return record;
+}
+
+export async function listConversationAttachments(ownerId: number, conversationId: string) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(conversationAttachments).where(and(eq(conversationAttachments.ownerId, ownerId), eq(conversationAttachments.conversationId, conversationId))).orderBy(asc(conversationAttachments.createdAt)).limit(80);
+}
+
+export async function getConversationAttachmentsByIds(ownerId: number, conversationId: string, attachmentIds: string[]) {
+  if (!attachmentIds.length) return [];
+  const attachments = await listConversationAttachments(ownerId, conversationId);
+  return attachments.filter(attachment => attachmentIds.includes(attachment.id));
+}
+
+export async function linkConversationAttachmentsToMessage(ownerId: number, conversationId: string, attachmentIds: string[], messageId: string) {
+  const db = await getDb();
+  if (!db || !attachmentIds.length) return;
+  const attachments = await getConversationAttachmentsByIds(ownerId, conversationId, attachmentIds);
+  for (const attachment of attachments) {
+    await db.update(conversationAttachments).set({ messageId }).where(and(eq(conversationAttachments.ownerId, ownerId), eq(conversationAttachments.id, attachment.id), eq(conversationAttachments.conversationId, conversationId)));
+  }
 }
 
 export async function listMessageFeedback(ownerId: number, messageIds: string[]) {

@@ -1,4 +1,4 @@
-import { AIChatBox, type Message } from "@/components/AIChatBox";
+import { AIChatBox, type ChatAttachment, type Message } from "@/components/AIChatBox";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -37,6 +37,10 @@ type HarbAssistantWorkspaceProps = {
   feedbackByMessage: Record<string, "up" | "down">;
   onSelectConversation: (conversationId: string) => void;
   onRateMessage: (messageId: string, rating: "up" | "down") => void;
+  pendingAttachments: ChatAttachment[];
+  isUploadingAttachments: boolean;
+  onSelectFiles: (files: File[]) => void;
+  onRemoveAttachment: (attachmentId: string) => void;
 };
 
 const responseModes: Array<{ id: ResponseMode; label: string; description: string }> = [
@@ -97,6 +101,10 @@ export function HarbAssistantWorkspace({
   feedbackByMessage,
   onSelectConversation,
   onRateMessage,
+  pendingAttachments,
+  isUploadingAttachments,
+  onSelectFiles,
+  onRemoveAttachment,
 }: HarbAssistantWorkspaceProps) {
   const selectedMode = responseModes.find(item => item.id === responseMode) ?? responseModes[1];
   const [isCompactViewport, setIsCompactViewport] = useState(false);
@@ -205,6 +213,10 @@ export function HarbAssistantWorkspace({
                   suggestedPrompts={suggestedPrompts}
                   feedbackByMessage={feedbackByMessage}
                   onRateMessage={onRateMessage}
+                  pendingAttachments={pendingAttachments}
+                  isUploadingAttachments={isUploadingAttachments}
+                  onSelectFiles={onSelectFiles}
+                  onRemoveAttachment={onRemoveAttachment}
                 />
               </div>
 
