@@ -104,11 +104,17 @@ function formatBytes(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} ميغابايت`;
 }
 
-function fileToBase64(file: File) {
+function fileToBase64(file: File, signal?: AbortSignal) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
+    const abort = () => reader.abort();
+    if (signal?.aborted) return reject(new DOMException("تم إلغاء رفع المرفق.", "AbortError"));
+    signal?.addEventListener("abort", abort, { once: true });
+    const cleanUp = () => signal?.removeEventListener("abort", abort);
     reader.onerror = () => reject(new Error("تعذر قراءة الملف."));
+    reader.onabort = () => { cleanUp(); reject(new DOMException("تم إلغاء رفع المرفق.", "AbortError")); };
     reader.onload = () => {
+      cleanUp();
       const base64 = String(reader.result).split(",")[1];
       if (base64) resolve(base64);
       else reject(new Error("تعذر تحويل الملف."));
@@ -226,6 +232,8 @@ export default function Home() {
   const [auditSearch, setAuditSearch] = useState("");
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const attachmentUploadAbortRef = useRef<AbortController | null>(null);
+  const attachmentProgressTimerRef = useRef<number | null>(null);
   const dashboard = trpc.harb.dashboard.useQuery(undefined, { enabled: isAuthenticated });
   const audit = trpc.harb.audit.list.useQuery({ search: auditSearch }, { enabled: isAuthenticated });
   const conversations = trpc.harb.conversations.list.useQuery(undefined, { enabled: isAuthenticated });
@@ -293,6 +301,9 @@ export default function Home() {
     if (files.length > selected.length) toast.error("احتُفظ بأول ثلاثة مرفقات فقط.");
     if (selected.some(file => !allowedMimeTypes.has(file.type))) return toast.error("يدعم صندوق المحادثة صور JPEG وPNG وWebP وملفات PDF فقط.");
     if (selected.some(file => file.size > 8 * 1024 * 1024)) return toast.error("الحد الأقصى للمرفق الواحد هو 8 ميغابايت.");
+    if (attachmentProgressTimerRef.current) window.clearTimeout(attachmentProgressTimerRef.current);
+    const controller = new AbortController();
+    attachmentUploadAbortRef.current = controller;
     setIsUploadingChatAttachments(true);
     try {
       let conversationId = activeConversationId;
@@ -303,21 +314,32 @@ export default function Home() {
       for (let index = 0; index < selected.length; index += 1) {
         const file = selected[index];
         setAttachmentProgress({ stage: "preparing", current: index + 1, total: selected.length, fileName: file.name });
-        const base64 = await fileToBase64(file);
+        const base64 = await fileToBase64(file, controller.signal);
+        if (controller.signal.aborted) throw new DOMException("تم إلغاء رفع المرفق.", "AbortError");
         setAttachmentProgress({ stage: "uploading", current: index + 1, total: selected.length, fileName: file.name });
         const attachment = await uploadConversationAttachment.mutateAsync({ conversationId, name: file.name, mimeType: file.type, base64 });
+        if (controller.signal.aborted) throw new DOMException("تم إلغاء رفع المرفق.", "AbortError");
         setPendingAttachments(current => [...current, attachment]);
         setAttachmentProgress({ stage: "ready", current: index + 1, total: selected.length, fileName: file.name });
       }
       void utils.harb.conversations.get.invalidate();
       void utils.harb.conversations.list.invalidate();
-      window.setTimeout(() => setAttachmentProgress(null), 900);
+      attachmentProgressTimerRef.current = window.setTimeout(() => setAttachmentProgress(null), 900);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "تعذر رفع المرفق.");
+      if (!(error instanceof DOMException && error.name === "AbortError")) toast.error(error instanceof Error ? error.message : "تعذر رفع المرفق.");
       setAttachmentProgress(null);
     } finally {
+      if (attachmentUploadAbortRef.current === controller) attachmentUploadAbortRef.current = null;
       setIsUploadingChatAttachments(false);
     }
+  };
+  const cancelChatAttachmentUpload = () => {
+    attachmentUploadAbortRef.current?.abort();
+    attachmentUploadAbortRef.current = null;
+    if (attachmentProgressTimerRef.current) window.clearTimeout(attachmentProgressTimerRef.current);
+    setAttachmentProgress(null);
+    setIsUploadingChatAttachments(false);
+    toast.info("تم إلغاء رفع المرفق. لن يُربط أي مرفق ملغى برسالتك.");
   };
   const handleUpload = (file?: File) => {
     if (!file) return;
@@ -381,6 +403,7 @@ export default function Home() {
       attachmentProgress={attachmentProgress}
       isAnalyzingAttachments={isAnalyzingAttachments}
       onSelectFiles={files => { void handleChatAttachments(files); }}
+      onCancelUpload={cancelChatAttachmentUpload}
       onRemoveAttachment={attachmentId => setPendingAttachments(current => current.filter(attachment => attachment.id !== attachmentId))}
     />;
   }

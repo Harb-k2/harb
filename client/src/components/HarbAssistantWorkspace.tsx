@@ -42,6 +42,7 @@ type HarbAssistantWorkspaceProps = {
   attachmentProgress: AttachmentUploadProgress | null;
   isAnalyzingAttachments: boolean;
   onSelectFiles: (files: File[]) => void;
+  onCancelUpload: () => void;
   onRemoveAttachment: (attachmentId: string) => void;
 };
 
@@ -108,6 +109,7 @@ export function HarbAssistantWorkspace({
   attachmentProgress,
   isAnalyzingAttachments,
   onSelectFiles,
+  onCancelUpload,
   onRemoveAttachment,
 }: HarbAssistantWorkspaceProps) {
   const selectedMode = responseModes.find(item => item.id === responseMode) ?? responseModes[1];
@@ -222,6 +224,7 @@ export function HarbAssistantWorkspace({
                   attachmentProgress={attachmentProgress}
                   isAnalyzingAttachments={isAnalyzingAttachments}
                   onSelectFiles={onSelectFiles}
+                  onCancelUpload={onCancelUpload}
                   onRemoveAttachment={onRemoveAttachment}
                 />
               </div>
