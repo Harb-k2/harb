@@ -85,6 +85,12 @@ const llm = vi.hoisted(() => ({ invokeLLM: vi.fn(), listLLMModels: vi.fn() }));
 vi.mock("./_core/llm", () => llm);
 const storage = vi.hoisted(() => ({ storagePut: vi.fn(), storageGetSignedUrl: vi.fn() }));
 vi.mock("./storage", () => storage);
+const pdf = vi.hoisted(() => {
+  const getText = vi.fn();
+  const destroy = vi.fn();
+  return { getText, destroy, PDFParse: vi.fn().mockImplementation(() => ({ getText, destroy })) };
+});
+vi.mock("pdf-parse", () => ({ PDFParse: pdf.PDFParse }));
 const knowledgeIndex = vi.hoisted(() => ({ indexKnowledgeStorageObject: vi.fn() }));
 vi.mock("./knowledgeIndex", () => knowledgeIndex);
 
@@ -169,6 +175,8 @@ describe("Harb permission workflows", () => {
     llm.invokeLLM.mockResolvedValue({ choices: [{ message: { content: "تحليل آمن ومقيد بالتفويض." } }] });
     storage.storagePut.mockResolvedValue({ key: "owners/7/conversations/conversation-01/evidence.png", url: "/manus-storage/evidence.png" });
     storage.storageGetSignedUrl.mockResolvedValue("https://signed.example/evidence.png");
+    pdf.getText.mockResolvedValue({ text: "هذا مستند تفويض يشرح نطاق الاختبار المعتمد وخطوات المراجعة الآمنة." });
+    pdf.destroy.mockResolvedValue(undefined);
     db.getKnowledgeSource.mockResolvedValue({ id: "source-01", collectionId: "collection-01", sourceType: "workspace_file", storageKey: "owner/notes.txt", mimeType: "text/plain" });
     db.getDesktopAgentById.mockResolvedValue({ id: "agent-01", ownerId: 7, agentTokenHash: desktopTokenHash, status: "online", scopes: "read_files,run_commands" });
     knowledgeIndex.indexKnowledgeStorageObject.mockResolvedValue({ status: "ready", chunks: [{ excerpt: "تفويض الأصل قبل أي اختبار.", contentHash: "hash-01" }] });
@@ -225,6 +233,23 @@ describe("Harb permission workflows", () => {
     expect(db.linkConversationAttachmentsToMessage).toHaveBeenCalledWith(7, "conversation-01", ["attachment-01"], "message-01");
     expect(storage.storageGetSignedUrl).toHaveBeenCalledWith(attachment.storageKey);
     expect(llm.invokeLLM).toHaveBeenCalledWith(expect.objectContaining({ messages: expect.arrayContaining([expect.objectContaining({ role: "user", content: expect.arrayContaining([expect.objectContaining({ type: "image_url", image_url: expect.objectContaining({ url: "https://signed.example/evidence.png" }) })]) })]) }));
+  });
+
+  it("يستخرج النص من PDF خاص ويلخّص الصفحات الأولى داخل المحادثة", async () => {
+    const attachment = { id: "attachment-pdf-01", conversationId: "conversation-01", originalName: "scope.pdf", mimeType: "application/pdf", size: 640, storageKey: "owners/7/conversations/conversation-01/scope.pdf", storageUrl: "/manus-storage/scope.pdf", kind: "document", analysisStatus: "ready" };
+    db.getConversation.mockResolvedValue({ id: "conversation-01", title: "محادثة جديدة", detectedLanguage: "arabic" });
+    db.getConversationAttachmentsByIds.mockResolvedValue([attachment]);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, arrayBuffer: async () => new Uint8Array([37, 80, 68, 70]).buffer }));
+
+    const result = await appRouter.createCaller(createContext()).harb.conversations.attachments.summarizePdf({ conversationId: "conversation-01", attachmentId: "attachment-pdf-01" });
+
+    expect(result.status).toBe("completed");
+    expect(pdf.PDFParse).toHaveBeenCalled();
+    expect(pdf.getText).toHaveBeenCalledWith({ partial: [1, 2, 3] });
+    expect(pdf.destroy).toHaveBeenCalled();
+    expect(llm.invokeLLM).toHaveBeenCalledWith(expect.objectContaining({ messages: expect.arrayContaining([expect.objectContaining({ role: "user", content: expect.stringContaining("نطاق الاختبار") })]) }));
+    expect(db.createConversationMessage).toHaveBeenCalledWith(7, expect.objectContaining({ conversationId: "conversation-01", role: "assistant", content: expect.stringContaining("ملخص سريع") }));
+    expect(db.createAuditEntry).toHaveBeenCalledWith(7, expect.objectContaining({ eventType: "conversation.pdf_summary", outcome: "completed" }));
   });
 
   it("يسجل تقييم المالك لرد محفوظ داخل محادثته فقط", async () => {

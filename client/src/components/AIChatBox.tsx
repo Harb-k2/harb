@@ -17,7 +17,7 @@ export type ChatAttachment = {
 };
 
 export type AttachmentUploadProgress = {
-  stage: "preparing" | "uploading" | "ready";
+  stage: "preparing" | "uploading" | "extracting" | "ready";
   current: number;
   total: number;
   fileName: string;
@@ -74,8 +74,8 @@ export function AIChatBox({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const displayMessages = messages.filter(message => message.role !== "system");
-  const progressStageLabel = attachmentProgress?.stage === "preparing" ? "يجري تجهيز المرفق" : attachmentProgress?.stage === "uploading" ? "يجري رفع المرفق بشكل خاص" : "أصبح المرفق جاهزاً للتحليل";
-  const progressWithinStage = attachmentProgress?.stage === "preparing" ? 25 : attachmentProgress?.stage === "uploading" ? 70 : 100;
+  const progressStageLabel = attachmentProgress?.stage === "preparing" ? "يجري تجهيز المرفق" : attachmentProgress?.stage === "uploading" ? "يجري رفع المرفق بشكل خاص" : attachmentProgress?.stage === "extracting" ? "يجري استخراج النص والملخص" : "أصبح المرفق جاهزاً للتحليل";
+  const progressWithinStage = attachmentProgress?.stage === "preparing" ? 25 : attachmentProgress?.stage === "uploading" ? 70 : attachmentProgress?.stage === "extracting" ? 88 : 100;
   const attachmentProgressPercent = attachmentProgress ? Math.round((((attachmentProgress.current - 1) + progressWithinStage / 100) / attachmentProgress.total) * 100) : 0;
 
   const scrollToBottom = () => {
