@@ -9,6 +9,11 @@ const desktopTokenHash = createHash("sha256").update(desktopToken).digest("hex")
 const db = vi.hoisted(() => ({
   createApproval: vi.fn(),
   createAuditEntry: vi.fn(),
+  createBenchmarkCase: vi.fn(),
+  createBenchmarkResult: vi.fn(),
+  createBenchmarkRun: vi.fn(),
+  createConversation: vi.fn(),
+  createConversationMessage: vi.fn(),
   createCyberAsset: vi.fn(),
   createCyberOperation: vi.fn(),
   createDesktopAgent: vi.fn(),
@@ -17,6 +22,7 @@ const db = vi.hoisted(() => ({
   createModelEvaluation: vi.fn(),
   createModelObjective: vi.fn(),
   completeModelEvaluation: vi.fn(),
+  completeBenchmarkRun: vi.fn(),
   createRule: vi.fn(),
   createTask: vi.fn(),
   createWorkspaceFile: vi.fn(),
@@ -25,12 +31,19 @@ const db = vi.hoisted(() => ({
   ensureHarbDefaults: vi.fn(),
   findDesktopPairing: vi.fn(),
   getBaseModelSelection: vi.fn(),
+  getConversation: vi.fn(),
   getDesktopAgentById: vi.fn(),
   getCyberAsset: vi.fn(),
   getCyberOperation: vi.fn(),
   getKnowledgeSource: vi.fn(),
   isBaseModelSelectionStoreReady: vi.fn(),
   listApprovals: vi.fn(),
+  listBenchmarkCases: vi.fn(),
+  listBenchmarkResults: vi.fn(),
+  listBenchmarkRuns: vi.fn(),
+  listConversationMessages: vi.fn(),
+  listConversations: vi.fn(),
+  listMessageFeedback: vi.fn(),
   listAuditEntries: vi.fn(),
   listDesktopAgents: vi.fn(),
   listCyberAssets: vi.fn(),
@@ -54,10 +67,13 @@ const db = vi.hoisted(() => ({
   updateDesktopAgent: vi.fn(),
   updateCyberOwnerPolicy: vi.fn(),
   updateCyberOperation: vi.fn(),
+  updateConversation: vi.fn(),
   updateKnowledgeSource: vi.fn(),
   updateRule: vi.fn(),
   updateWorkspaceFile: vi.fn(),
   updateTask: vi.fn(),
+  upsertMessageFeedback: vi.fn(),
+  reviewBenchmarkResult: vi.fn(),
 }));
 
 vi.mock("./db", () => db);
@@ -91,6 +107,16 @@ describe("Harb permission workflows", () => {
     vi.clearAllMocks();
     db.listRules.mockResolvedValue([]);
     db.createTask.mockResolvedValue({ id: "task-01" });
+    db.createConversation.mockResolvedValue({ id: "conversation-01", title: "محادثة جديدة", detectedLanguage: "auto" });
+    db.createConversationMessage.mockResolvedValue({ id: "message-01" });
+    db.listConversationMessages.mockResolvedValue([]);
+    db.listConversations.mockResolvedValue([]);
+    db.listMessageFeedback.mockResolvedValue([]);
+    db.createBenchmarkCase.mockResolvedValue({ id: "benchmark-case-01", title: "حالة معيارية" });
+    db.createBenchmarkRun.mockResolvedValue({ id: "benchmark-run-01" });
+    db.listBenchmarkCases.mockResolvedValue([]);
+    db.listBenchmarkRuns.mockResolvedValue([]);
+    db.listBenchmarkResults.mockResolvedValue([]);
     db.createApproval.mockResolvedValue({ id: "approval-01" });
     db.createCyberOperation.mockResolvedValue({ id: "cyber-operation-01" });
     db.getCyberAsset.mockResolvedValue({
@@ -155,6 +181,38 @@ describe("Harb permission workflows", () => {
     expect(result.decision).toBe("allow");
     expect(db.searchKnowledgeChunks).toHaveBeenCalledWith(7, "حلل تقرير KEV وفق التفويض", undefined, 3);
     expect(llm.invokeLLM).toHaveBeenCalledWith(expect.objectContaining({ messages: expect.arrayContaining([expect.objectContaining({ role: "system", content: expect.stringContaining("تحقق من التفويض قبل أي اختبار") })]) }));
+  });
+
+  it("يحفظ المحادثة ويجعل لغة الرد تتبع لغة رسالة المستخدم", async () => {
+    const result = await appRouter.createCaller(createContext()).harb.tasks.submit({ request: "Summarize the approved scope in two points." });
+
+    expect(result.conversationId).toBe("conversation-01");
+    expect(db.createConversation).toHaveBeenCalledWith(7, expect.objectContaining({ detectedLanguage: "latin" }));
+    expect(db.createConversationMessage).toHaveBeenCalledWith(7, expect.objectContaining({ role: "user", language: "latin" }));
+    expect(llm.invokeLLM).toHaveBeenCalledWith(expect.objectContaining({ messages: expect.arrayContaining([expect.objectContaining({ role: "system", content: expect.stringContaining("Respond in the same language") })]) }));
+  });
+
+  it("يسجل تقييم المالك لرد محفوظ داخل محادثته فقط", async () => {
+    db.listConversationMessages.mockResolvedValue([{ id: "message-01", role: "assistant", content: "رد محفوظ" }]);
+    db.upsertMessageFeedback.mockResolvedValue({ id: "feedback-01", messageId: "message-01", rating: "up" });
+
+    const result = await appRouter.createCaller(createContext()).harb.conversations.feedback({ conversationId: "conversation-01", messageId: "message-01", rating: "up" });
+
+    expect(result).toEqual(expect.objectContaining({ rating: "up" }));
+    expect(db.upsertMessageFeedback).toHaveBeenCalledWith(7, "message-01", "up", null);
+    expect(db.createAuditEntry).toHaveBeenCalledWith(7, expect.objectContaining({ eventType: "conversation.feedback" }));
+  });
+
+  it("يشغّل المقارنة على حالة موثقة بين النموذجين المعتمدين فقط", async () => {
+    db.getBaseModelSelection.mockResolvedValue({ id: "base-model-01", primaryModelId: "gpt-5", fallbackModelId: "gpt-5-mini", status: "approved" });
+    db.listBenchmarkCases.mockResolvedValue([{ id: "benchmark-case-01", title: "حالة مفوضة", prompt: "حلل هذه الحالة ضمن التفويض", successCriteria: "التزام واضح", evidenceReference: "report://authorized-01", language: "arabic", isActive: true }]);
+
+    const result = await appRouter.createCaller(createContext()).harb.lab.benchmarks.runs.start({ caseIds: ["benchmark-case-01"] });
+
+    expect(result.expectedCount).toBe(2);
+    expect(db.createBenchmarkResult).toHaveBeenCalledTimes(2);
+    expect(db.createBenchmarkResult).toHaveBeenCalledWith(7, expect.objectContaining({ reviewerScore: null, status: "completed" }));
+    expect(db.completeBenchmarkRun).toHaveBeenCalledWith(7, "benchmark-run-01", "completed");
   });
 
   it("يستخدم نموذج المالك المعتمد ثم ينتقل إلى البديل عند تعذر الاستجابة", async () => {

@@ -1,11 +1,12 @@
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
-import { ArrowUp, Loader2, Sparkles, User } from "lucide-react";
+import { ArrowUp, Loader2, Sparkles, ThumbsDown, ThumbsUp, User } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Streamdown } from "streamdown";
 
 export type Message = {
+  id?: string;
   role: "system" | "user" | "assistant";
   content: string;
 };
@@ -19,6 +20,8 @@ export type AIChatBoxProps = {
   height?: string | number;
   emptyStateMessage?: string;
   suggestedPrompts?: string[];
+  feedbackByMessage?: Record<string, "up" | "down">;
+  onRateMessage?: (messageId: string, rating: "up" | "down") => void;
 };
 
 export function AIChatBox({
@@ -30,6 +33,8 @@ export function AIChatBox({
   height = "600px",
   emptyStateMessage = "ابدأ محادثة جديدة مع Harb.",
   suggestedPrompts,
+  feedbackByMessage = {},
+  onRateMessage,
 }: AIChatBoxProps) {
   const [input, setInput] = useState("");
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -89,6 +94,13 @@ export function AIChatBox({
                   {message.role === "assistant" && <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-primary/12 text-primary"><Sparkles className="size-4" /></div>}
                   <div className={cn("max-w-[min(88%,42rem)] rounded-2xl px-4 py-3 text-sm leading-7 sm:px-5", message.role === "user" ? "rounded-tr-sm bg-primary text-primary-foreground shadow-[0_10px_24px_oklch(0.79_0.144_169_/_13%)]" : "rounded-tl-sm border border-white/8 bg-white/[0.045] text-foreground")}>
                     {message.role === "assistant" ? <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-0 prose-li:my-1"><Streamdown>{message.content}</Streamdown></div> : <p className="whitespace-pre-wrap">{message.content}</p>}
+                    {message.role === "assistant" && message.id && onRateMessage && (
+                      <div className="mt-3 flex items-center gap-1 border-t border-white/8 pt-2">
+                        <span className="ml-1 text-[10px] text-muted-foreground">هل كان الرد مفيداً؟</span>
+                        <button type="button" onClick={() => onRateMessage(message.id!, "up")} aria-label="تقييم الرد مفيد" className={cn("rounded-md p-1.5 transition-colors hover:bg-primary/10", feedbackByMessage[message.id] === "up" ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-primary")}><ThumbsUp className="h-3.5 w-3.5" /></button>
+                        <button type="button" onClick={() => onRateMessage(message.id!, "down")} aria-label="تقييم الرد غير مفيد" className={cn("rounded-md p-1.5 transition-colors hover:bg-rose-400/10", feedbackByMessage[message.id] === "down" ? "bg-rose-400/15 text-rose-200" : "text-muted-foreground hover:text-rose-200")}><ThumbsDown className="h-3.5 w-3.5" /></button>
+                      </div>
+                    )}
                   </div>
                   {message.role === "user" && <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white/10 text-muted-foreground"><User className="size-4" /></div>}
                 </article>

@@ -1,10 +1,15 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { nanoid } from "nanoid";
 import {
   approvals,
   auditEntries,
   baseModelSelections,
+  benchmarkCases,
+  benchmarkResults,
+  benchmarkRuns,
+  conversationMessages,
+  conversations,
   cyberAssets,
   cyberOwnerPolicies,
   cyberOperations,
@@ -16,6 +21,7 @@ import {
   knowledgeCollections,
   knowledgeChunks,
   knowledgeSources,
+  messageFeedback,
   modelEvaluations,
   modelObjectives,
   ownerRules,
@@ -433,6 +439,121 @@ export async function approveBaseModelSelection(ownerId: number) {
   const approvedAt = new Date();
   await db.update(baseModelSelections).set({ status: "approved", approvedAt }).where(eq(baseModelSelections.ownerId, ownerId));
   return { ...existing, status: "approved" as const, approvedAt };
+}
+
+export async function listConversations(ownerId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(conversations).where(eq(conversations.ownerId, ownerId)).orderBy(desc(conversations.updatedAt)).limit(40);
+}
+
+export async function getConversation(ownerId: number, id: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const rows = await db.select().from(conversations).where(and(eq(conversations.ownerId, ownerId), eq(conversations.id, id))).limit(1);
+  return rows[0];
+}
+
+export async function createConversation(ownerId: number, values: Omit<typeof conversations.$inferInsert, "id" | "ownerId" | "createdAt" | "updatedAt">) {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  const record = { id: nanoid(), ownerId, ...values };
+  await db.insert(conversations).values(record);
+  return record;
+}
+
+export async function updateConversation(ownerId: number, id: string, values: Partial<Omit<typeof conversations.$inferInsert, "id" | "ownerId" | "createdAt" | "updatedAt">>) {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  await db.update(conversations).set({ ...values, updatedAt: new Date() }).where(and(eq(conversations.ownerId, ownerId), eq(conversations.id, id)));
+}
+
+export async function listConversationMessages(ownerId: number, conversationId: string) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(conversationMessages).where(and(eq(conversationMessages.ownerId, ownerId), eq(conversationMessages.conversationId, conversationId))).orderBy(asc(conversationMessages.createdAt)).limit(120);
+}
+
+export async function createConversationMessage(ownerId: number, values: Omit<typeof conversationMessages.$inferInsert, "id" | "ownerId" | "createdAt">) {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  const record = { id: nanoid(), ownerId, ...values };
+  await db.insert(conversationMessages).values(record);
+  return record;
+}
+
+export async function listMessageFeedback(ownerId: number, messageIds: string[]) {
+  const db = await getDb();
+  if (!db || !messageIds.length) return [];
+  const feedback = await db.select().from(messageFeedback).where(eq(messageFeedback.ownerId, ownerId)).orderBy(desc(messageFeedback.updatedAt)).limit(300);
+  return feedback.filter(item => messageIds.includes(item.messageId));
+}
+
+export async function upsertMessageFeedback(ownerId: number, messageId: string, rating: "up" | "down", note: string | null) {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  const rows = await db.select().from(messageFeedback).where(and(eq(messageFeedback.ownerId, ownerId), eq(messageFeedback.messageId, messageId))).limit(1);
+  if (rows[0]) {
+    await db.update(messageFeedback).set({ rating, note, updatedAt: new Date() }).where(eq(messageFeedback.id, rows[0].id));
+    return { ...rows[0], rating, note, updatedAt: new Date() };
+  }
+  const record = { id: nanoid(), ownerId, messageId, rating, note };
+  await db.insert(messageFeedback).values(record);
+  return record;
+}
+
+export async function createBenchmarkCase(ownerId: number, values: Omit<typeof benchmarkCases.$inferInsert, "id" | "ownerId" | "createdAt" | "updatedAt">) {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  const record = { id: nanoid(), ownerId, ...values };
+  await db.insert(benchmarkCases).values(record);
+  return record;
+}
+
+export async function listBenchmarkCases(ownerId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(benchmarkCases).where(eq(benchmarkCases.ownerId, ownerId)).orderBy(desc(benchmarkCases.updatedAt)).limit(80);
+}
+
+export async function createBenchmarkRun(ownerId: number, values: Omit<typeof benchmarkRuns.$inferInsert, "id" | "ownerId" | "createdAt" | "completedAt">) {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  const record = { id: nanoid(), ownerId, ...values, completedAt: null };
+  await db.insert(benchmarkRuns).values(record);
+  return record;
+}
+
+export async function completeBenchmarkRun(ownerId: number, id: string, status: "completed" | "failed") {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  await db.update(benchmarkRuns).set({ status, completedAt: new Date() }).where(and(eq(benchmarkRuns.ownerId, ownerId), eq(benchmarkRuns.id, id)));
+}
+
+export async function listBenchmarkRuns(ownerId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(benchmarkRuns).where(eq(benchmarkRuns.ownerId, ownerId)).orderBy(desc(benchmarkRuns.createdAt)).limit(24);
+}
+
+export async function createBenchmarkResult(ownerId: number, values: Omit<typeof benchmarkResults.$inferInsert, "id" | "ownerId" | "createdAt">) {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  const record = { id: nanoid(), ownerId, ...values };
+  await db.insert(benchmarkResults).values(record);
+  return record;
+}
+
+export async function listBenchmarkResults(ownerId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(benchmarkResults).where(eq(benchmarkResults.ownerId, ownerId)).orderBy(desc(benchmarkResults.createdAt)).limit(200);
+}
+
+export async function reviewBenchmarkResult(ownerId: number, id: string, reviewerScore: number, reviewerNotes: string | null) {
+  const db = await getDb();
+  if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");
+  await db.update(benchmarkResults).set({ reviewerScore, reviewerNotes, reviewedAt: new Date() }).where(and(eq(benchmarkResults.ownerId, ownerId), eq(benchmarkResults.id, id)));
 }
 
 export async function listAuditEntries(ownerId: number, search = "") {

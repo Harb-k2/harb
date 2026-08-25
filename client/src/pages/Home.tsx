@@ -3,6 +3,7 @@ import { AIChatBox, type Message } from "@/components/AIChatBox";
 import { HarbAssistantWorkspace, type ResponseMode } from "@/components/HarbAssistantWorkspace";
 import { CyberOperationsPanel } from "@/components/CyberOperationsPanel";
 import { ModelLabPanel } from "@/components/ModelLabPanel";
+import { BenchmarkPanel } from "@/components/BenchmarkPanel";
 import { KnowledgeControlPanel } from "@/components/KnowledgeControlPanel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -39,7 +40,7 @@ import {
   ShieldCheck,
   TerminalSquare,
 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type RuleScope = "all" | "general" | "command" | "file_change" | "data_share";
 type RuleAction = "allow" | "approval" | "deny";
@@ -204,16 +205,39 @@ export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [workspace, setWorkspace] = useState<"assistant" | "control">("assistant");
   const [responseMode, setResponseMode] = useState<ResponseMode>("balanced");
+  const [activeConversationId, setActiveConversationId] = useState<string | undefined>();
   const [auditSearch, setAuditSearch] = useState("");
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dashboard = trpc.harb.dashboard.useQuery(undefined, { enabled: isAuthenticated });
   const audit = trpc.harb.audit.list.useQuery({ search: auditSearch }, { enabled: isAuthenticated });
+  const conversations = trpc.harb.conversations.list.useQuery(undefined, { enabled: isAuthenticated });
+  const conversationInput = useMemo(() => ({ conversationId: activeConversationId ?? "unselected" }), [activeConversationId]);
+  const activeConversation = trpc.harb.conversations.get.useQuery(conversationInput, { enabled: isAuthenticated && Boolean(activeConversationId) });
   const refresh = () => { void utils.harb.dashboard.invalidate(); void utils.harb.audit.list.invalidate(); };
 
+  useEffect(() => {
+    if (!activeConversation.data) return;
+    setMessages(activeConversation.data.messages.map(message => ({ id: message.id, role: message.role, content: message.content })));
+  }, [activeConversation.data]);
+
   const submitTask = trpc.harb.tasks.submit.useMutation({
-    onSuccess: result => { setMessages(current => [...current, { role: "assistant", content: result.message }]); refresh(); },
+    onSuccess: result => {
+      setActiveConversationId(result.conversationId);
+      setMessages(current => [...current.filter(message => Boolean(message.id)), { id: result.userMessage.id, role: "user", content: result.userMessage.content }, { id: result.assistantMessage.id, role: "assistant", content: result.message }]);
+      void utils.harb.conversations.list.invalidate();
+      void utils.harb.conversations.get.invalidate();
+      refresh();
+    },
     onError: error => setMessages(current => [...current, { role: "assistant", content: `**تعذر إكمال الطلب.**\n\n${error.message}` }]),
+  });
+  const createConversation = trpc.harb.conversations.create.useMutation({
+    onSuccess: conversation => { setActiveConversationId(conversation.id); setMessages([]); void utils.harb.conversations.list.invalidate(); },
+    onError: error => toast.error(error.message),
+  });
+  const rateMessage = trpc.harb.conversations.feedback.useMutation({
+    onSuccess: () => { toast.success("تم تسجيل تقييمك لتحسين مراجعة الردود."); void utils.harb.conversations.get.invalidate(); },
+    onError: error => toast.error(error.message),
   });
   const createRule = trpc.harb.rules.create.useMutation({ onSuccess: () => { toast.success("تمت إضافة القاعدة."); refresh(); }, onError: error => toast.error(error.message) });
   const updateRule = trpc.harb.rules.update.useMutation({ onSuccess: () => { toast.success("تم تحديث القانون."); refresh(); }, onError: error => toast.error(error.message) });
@@ -231,7 +255,7 @@ export default function Home() {
       .slice(-8)
       .map(message => ({ role: message.role as "user" | "assistant", content: message.content }));
     setMessages(current => [...current, { role: "user", content: request }]);
-    submitTask.mutate({ request, responseMode, conversation });
+    submitTask.mutate({ request, responseMode, conversationId: activeConversationId, conversation });
   };
   const handleUpload = (file?: File) => {
     if (!file) return;
@@ -267,6 +291,7 @@ export default function Home() {
   const auditEntries = audit.data ?? data?.audit ?? [];
   const activeRules = rules.filter(rule => rule.isActive).length;
   const pendingApprovals = approvals.filter(item => item.status === "requested").length;
+  const feedbackByMessage = Object.fromEntries((activeConversation.data?.feedback ?? []).map(item => [item.messageId, item.rating])) as Record<string, "up" | "down">;
 
   if (workspace === "assistant") {
     return <HarbAssistantWorkspace
@@ -279,8 +304,16 @@ export default function Home() {
       taskCount={tasks.length}
       onSendMessage={handleSend}
       onResponseModeChange={setResponseMode}
-      onNewConversation={() => setMessages([])}
+      onNewConversation={() => createConversation.mutate({ title: "محادثة جديدة" })}
       onOpenControlCenter={() => setWorkspace("control")}
+      conversations={conversations.data ?? []}
+      activeConversationId={activeConversationId}
+      feedbackByMessage={feedbackByMessage}
+      onSelectConversation={conversationId => { setActiveConversationId(conversationId); setMessages([]); }}
+      onRateMessage={(messageId, rating) => {
+        if (!activeConversationId) return;
+        rateMessage.mutate({ messageId, conversationId: activeConversationId, rating });
+      }}
     />;
   }
 
@@ -304,6 +337,8 @@ export default function Home() {
           <CyberOperationsPanel />
 
           <ModelLabPanel />
+
+          <BenchmarkPanel />
 
           <KnowledgeControlPanel />
 

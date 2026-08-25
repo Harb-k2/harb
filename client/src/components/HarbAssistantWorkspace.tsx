@@ -8,12 +8,15 @@ import {
   ChevronLeft,
   FileCheck2,
   Gavel,
+  History,
   LayoutDashboard,
+  Languages,
   MessageSquarePlus,
   PanelRightOpen,
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
+import { useEffect, useState } from "react";
 
 export type ResponseMode = "brief" | "balanced" | "deep";
 
@@ -29,6 +32,11 @@ type HarbAssistantWorkspaceProps = {
   onResponseModeChange: (mode: ResponseMode) => void;
   onNewConversation: () => void;
   onOpenControlCenter: () => void;
+  conversations: Array<{ id: string; title: string; detectedLanguage: string; updatedAt: Date | string }>;
+  activeConversationId?: string;
+  feedbackByMessage: Record<string, "up" | "down">;
+  onSelectConversation: (conversationId: string) => void;
+  onRateMessage: (messageId: string, rating: "up" | "down") => void;
 };
 
 const responseModes: Array<{ id: ResponseMode; label: string; description: string }> = [
@@ -84,13 +92,27 @@ export function HarbAssistantWorkspace({
   onResponseModeChange,
   onNewConversation,
   onOpenControlCenter,
+  conversations,
+  activeConversationId,
+  feedbackByMessage,
+  onSelectConversation,
+  onRateMessage,
 }: HarbAssistantWorkspaceProps) {
   const selectedMode = responseModes.find(item => item.id === responseMode) ?? responseModes[1];
+  const [isCompactViewport, setIsCompactViewport] = useState(false);
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 1023px)");
+    const update = () => setIsCompactViewport(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
 
   return (
     <div className="harb-shell min-h-screen" dir="rtl">
       <div className="harb-assistant-layout mx-auto max-w-[1720px]">
-        <aside className="hidden min-w-0 flex-col border-l border-white/10 bg-[#0d1520]/80 px-4 py-5 backdrop-blur-xl lg:flex">
+        <aside className="harb-sidebar min-w-0 flex-col border-l border-white/10 bg-[#0d1520]/80 px-4 py-5 backdrop-blur-xl">
           <div className="flex items-center gap-3 px-2">
             <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary text-lg font-black text-primary-foreground shadow-[0_12px_28px_oklch(0.79_0.144_169_/_18%)]">ح</div>
             <div>
@@ -109,7 +131,19 @@ export function HarbAssistantWorkspace({
             <NavigationItem icon={LayoutDashboard} label="مركز العمليات" onClick={onOpenControlCenter} />
           </nav>
 
-          <div className="mt-8 border-t border-white/10 pt-6">
+          <div className="mt-7 min-h-0 flex-1 border-t border-white/10 pt-5">
+            <div className="flex items-center justify-between px-2"><p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">المحادثات الأخيرة</p><History className="h-3.5 w-3.5 text-muted-foreground" /></div>
+            <div className="mt-3 max-h-56 space-y-1 overflow-y-auto pr-1">
+              {conversations.length ? conversations.slice(0, 8).map(conversation => (
+                <button key={conversation.id} type="button" onClick={() => onSelectConversation(conversation.id)} className={cn("w-full rounded-xl px-3 py-2 text-right transition-colors", activeConversationId === conversation.id ? "bg-primary/10 text-foreground" : "text-muted-foreground hover:bg-white/5 hover:text-foreground")}>
+                  <span className="block truncate text-xs font-medium">{conversation.title}</span>
+                  <span className="mt-1 block text-[10px] text-muted-foreground">{conversation.detectedLanguage === "arabic" ? "العربية" : conversation.detectedLanguage === "latin" ? "لغة لاتينية" : conversation.detectedLanguage === "mixed" ? "متعددة اللغات" : "لغة مكتشفة تلقائياً"}</span>
+                </button>
+              )) : <p className="rounded-xl border border-dashed border-white/10 p-3 text-center text-[11px] leading-5 text-muted-foreground">تظهر محادثاتك هنا بعد إرسال أول طلب.</p>}
+            </div>
+          </div>
+
+          <div className="mt-5 border-t border-white/10 pt-5">
             <p className="px-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">سياق محكوم</p>
             <div className="mt-3 space-y-1">
               <NavigationItem icon={Gavel} label={`${activeRules} قوانين فعّالة`} onClick={onOpenControlCenter} />
@@ -124,14 +158,14 @@ export function HarbAssistantWorkspace({
           </div>
         </aside>
 
-        <main className="flex w-full min-w-0 flex-1 flex-col">
-          <header className="flex min-h-16 items-center justify-between border-b border-white/10 bg-[#0d1520]/45 px-4 py-3 backdrop-blur-xl sm:px-7">
+        <main className="harb-workspace-main flex w-full min-w-0 flex-1 flex-col">
+          <header className="flex min-h-16 items-center justify-between border-b border-white/10 bg-[#0d1520]/70 px-4 py-3 backdrop-blur-xl sm:px-7">
             <div className="min-w-0">
-              <div className="flex items-center gap-2 lg:hidden"><span className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary text-sm font-black text-primary-foreground">ح</span><span className="font-bold">Harb</span></div>
-              <div className="hidden lg:block"><p className="text-sm font-semibold">مرحباً، {userName}</p><p className="mt-0.5 text-xs text-muted-foreground">مساعد واضح ومقيّد بقانون المالك</p></div>
+              <div className="harb-mobile-brand items-center gap-2"><span className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary text-sm font-black text-primary-foreground">ح</span><span className="font-bold">Harb</span></div>
+              <div className="harb-desktop-greeting"><p className="text-sm font-semibold">مرحباً، {userName}</p><p className="mt-0.5 text-xs text-muted-foreground">مساعد واضح ومقيّد بقانون المالك</p></div>
             </div>
             <div className="flex items-center gap-2">
-              <Badge variant="outline" className="hidden border-primary/20 bg-primary/5 px-3 py-1.5 text-primary sm:inline-flex"><span className="ml-2 h-1.5 w-1.5 rounded-full bg-primary shadow-[0_0_10px_var(--primary)]" />وضع محمي</Badge>
+              <Badge variant="outline" className="harb-language-badge harb-command-label px-3 py-1.5"><Languages className="ml-1.5 h-3.5 w-3.5" />لغة الرد تلقائية</Badge>
               <Button variant="outline" size="sm" onClick={onOpenControlCenter} className="rounded-xl border-white/15 bg-white/5 text-xs hover:bg-white/10"><PanelRightOpen className="ml-1.5 h-4 w-4" />مركز التحكم</Button>
             </div>
           </header>
@@ -140,10 +174,10 @@ export function HarbAssistantWorkspace({
             <div className="mx-auto flex w-full min-h-0 max-w-[1200px] flex-1 flex-col">
               <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <p className="section-kicker">Harb Assistant</p>
+                  <p className="section-kicker">Harb Assistant / Command Console</p>
                   <h1 className="mt-1 text-xl font-bold tracking-tight sm:text-2xl">كيف يمكنني مساعدتك اليوم؟</h1>
                 </div>
-                <div className="flex w-full rounded-xl border border-white/10 bg-black/10 p-1 sm:w-auto" role="group" aria-label="مستوى عمق الإجابة">
+                <div className="flex w-full rounded-xl border border-white/10 bg-black/20 p-1 shadow-inner sm:w-auto" role="group" aria-label="مستوى عمق الإجابة">
                   {responseModes.map(mode => (
                     <button
                       key={mode.id}
@@ -166,23 +200,25 @@ export function HarbAssistantWorkspace({
                   isLoading={isLoading}
                   height="100%"
                   className="h-full border-0 bg-transparent shadow-none"
-                  placeholder="اكتب طلبك بوضوح… يراجع Harb القوانين قبل المتابعة"
+                  placeholder="اكتب بأي لغة… يراجع Harb القوانين قبل المتابعة"
                   emptyStateMessage="ابدأ من طلب واضح، وسأشرح ما يمكن فعله وما يحتاج إلى موافقة."
                   suggestedPrompts={suggestedPrompts}
+                  feedbackByMessage={feedbackByMessage}
+                  onRateMessage={onRateMessage}
                 />
               </div>
 
               <div className="mt-3 flex items-center justify-between gap-3 px-1 text-[11px] text-muted-foreground">
                 <span className="flex items-center gap-1.5"><ShieldCheck className="h-3.5 w-3.5 text-primary" />لا تُنفّذ الإجراءات الحساسة تلقائياً.</span>
-                <span className="hidden sm:inline">نمط الإجابة: {selectedMode.label}</span>
+                <span className="harb-mode-label">نمط الإجابة: {selectedMode.label} · لغة الرد تتبع رسالتك</span>
               </div>
             </div>
           </section>
 
-          <div className="flex items-center gap-2 border-t border-white/10 bg-[#0d1520]/65 px-3 py-2 lg:hidden">
+          {isCompactViewport && <div className="harb-mobile-actions items-center gap-2 border-t border-white/10 bg-[#0d1520]/65 px-3 py-2">
             <Button variant="ghost" size="sm" className="flex-1 text-xs text-primary" onClick={onNewConversation}><MessageSquarePlus className="ml-1.5 h-4 w-4" />محادثة جديدة</Button>
             <Button variant="ghost" size="sm" className="flex-1 text-xs" onClick={onOpenControlCenter}>مركز العمليات<ChevronLeft className="mr-1.5 h-4 w-4" /></Button>
-          </div>
+          </div>}
         </main>
       </div>
     </div>

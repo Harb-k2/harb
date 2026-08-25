@@ -203,6 +203,74 @@ export const baseModelSelections = mysqlTable("base_model_selections", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
+export const conversations = mysqlTable("conversations", {
+  id: varchar("id", { length: 48 }).primaryKey(),
+  ownerId: int("ownerId").notNull(),
+  title: varchar("title", { length: 180 }).notNull(),
+  detectedLanguage: varchar("detectedLanguage", { length: 32 }).default("auto").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const conversationMessages = mysqlTable("conversation_messages", {
+  id: varchar("id", { length: 48 }).primaryKey(),
+  ownerId: int("ownerId").notNull(),
+  conversationId: varchar("conversationId", { length: 48 }).notNull(),
+  taskId: varchar("taskId", { length: 48 }),
+  role: mysqlEnum("role", ["user", "assistant"]).notNull(),
+  content: text("content").notNull(),
+  language: varchar("language", { length: 32 }).default("auto").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const messageFeedback = mysqlTable("message_feedback", {
+  id: varchar("id", { length: 48 }).primaryKey(),
+  ownerId: int("ownerId").notNull(),
+  messageId: varchar("messageId", { length: 48 }).notNull(),
+  rating: mysqlEnum("rating", ["up", "down"]).notNull(),
+  note: text("note"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const benchmarkCases = mysqlTable("benchmark_cases", {
+  id: varchar("id", { length: 48 }).primaryKey(),
+  ownerId: int("ownerId").notNull(),
+  title: varchar("title", { length: 180 }).notNull(),
+  prompt: text("prompt").notNull(),
+  successCriteria: text("successCriteria").notNull(),
+  evidenceReference: varchar("evidenceReference", { length: 700 }).notNull(),
+  language: varchar("language", { length: 32 }).default("auto").notNull(),
+  isActive: boolean("isActive").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const benchmarkRuns = mysqlTable("benchmark_runs", {
+  id: varchar("id", { length: 48 }).primaryKey(),
+  ownerId: int("ownerId").notNull(),
+  modelIds: text("modelIds").notNull(),
+  caseCount: int("caseCount").notNull(),
+  status: mysqlEnum("status", ["running", "completed", "failed"]).default("running").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  completedAt: timestamp("completedAt"),
+});
+
+export const benchmarkResults = mysqlTable("benchmark_results", {
+  id: varchar("id", { length: 48 }).primaryKey(),
+  ownerId: int("ownerId").notNull(),
+  runId: varchar("runId", { length: 48 }).notNull(),
+  caseId: varchar("caseId", { length: 48 }).notNull(),
+  modelId: varchar("modelId", { length: 160 }).notNull(),
+  response: text("response"),
+  responseLanguage: varchar("responseLanguage", { length: 32 }).default("auto").notNull(),
+  status: mysqlEnum("status", ["completed", "failed"]).default("completed").notNull(),
+  reviewerScore: int("reviewerScore"),
+  reviewerNotes: text("reviewerNotes"),
+  reviewedAt: timestamp("reviewedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
 export const auditEntries = mysqlTable("audit_entries", {
   id: varchar("id", { length: 48 }).primaryKey(),
   ownerId: int("ownerId").notNull(),
@@ -252,6 +320,12 @@ export type KnowledgeSource = typeof knowledgeSources.$inferSelect;
 export type KnowledgeChunk = typeof knowledgeChunks.$inferSelect;
 export type ModelEvaluation = typeof modelEvaluations.$inferSelect;
 export type BaseModelSelection = typeof baseModelSelections.$inferSelect;
+export type Conversation = typeof conversations.$inferSelect;
+export type ConversationMessage = typeof conversationMessages.$inferSelect;
+export type MessageFeedback = typeof messageFeedback.$inferSelect;
+export type BenchmarkCase = typeof benchmarkCases.$inferSelect;
+export type BenchmarkRun = typeof benchmarkRuns.$inferSelect;
+export type BenchmarkResult = typeof benchmarkResults.$inferSelect;
 export type AuditEntry = typeof auditEntries.$inferSelect;
 export type DesktopAgent = typeof desktopAgents.$inferSelect;
 export type DesktopPairing = typeof desktopPairings.$inferSelect;

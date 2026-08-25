@@ -56,17 +56,32 @@
   html { scroll-behavior: smooth; }
   html, body, #root { width: 100%; min-height: 100%; }
   body { @apply bg-background text-foreground; margin: 0; font-family: "IBM Plex Sans Arabic", sans-serif; }
+  input:not([type="checkbox"]):not([type="radio"]), textarea, select { color: var(--foreground); background-color: oklch(0.145 0.018 250 / 92%); border-color: oklch(0.82 0.025 250 / 18%); }
+  input:not([type="checkbox"]):not([type="radio"])::placeholder, textarea::placeholder { color: oklch(0.62 0.02 250); }
   button:not(:disabled), [role="button"]:not([aria-disabled="true"]), [type="button"]:not(:disabled), [type="submit"]:not(:disabled), a[href] { @apply cursor-pointer; }
 }
 
 @layer components {
   .harb-shell {
+    position: relative;
+    isolation: isolate;
     width: 100%;
     overflow-x: clip;
     background:
-      radial-gradient(circle at 18% 6%, oklch(0.39 0.11 188 / 18%), transparent 28rem),
-      radial-gradient(circle at 84% 34%, oklch(0.48 0.12 250 / 13%), transparent 34rem),
-      linear-gradient(135deg, oklch(0.11 0.016 250), oklch(0.135 0.02 247));
+      radial-gradient(circle at 18% 6%, oklch(0.42 0.12 188 / 20%), transparent 30rem),
+      radial-gradient(circle at 84% 34%, oklch(0.31 0.08 250 / 18%), transparent 36rem),
+      linear-gradient(135deg, oklch(0.095 0.015 250), oklch(0.125 0.018 247));
+  }
+  .harb-shell::before {
+    position: absolute;
+    z-index: -1;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.32;
+    content: "";
+    background-image: linear-gradient(oklch(0.8 0.03 190 / 4%) 1px, transparent 1px), linear-gradient(90deg, oklch(0.8 0.03 190 / 4%) 1px, transparent 1px);
+    background-size: 52px 52px;
+    mask-image: linear-gradient(to bottom, black, transparent 78%);
   }
   .glass-panel {
     border: 1px solid oklch(1 0 0 / 10%);
@@ -91,15 +106,37 @@
   }
   .assistant-chat-frame {
     min-height: min(680px, calc(100dvh - 205px));
+    position: relative;
+    background: radial-gradient(circle at 75% 0%, oklch(0.32 0.09 190 / 10%), transparent 31rem), oklch(0.125 0.018 250 / 92%);
+    box-shadow: 0 28px 72px oklch(0 0 0 / 30%), inset 0 1px 0 oklch(1 0 0 / 6%);
   }
   .harb-assistant-layout {
     display: grid;
     min-height: 100dvh;
     width: 100vw;
+    direction: ltr;
     grid-template-columns: minmax(0, 1fr);
   }
+  .harb-sidebar { display: none !important; direction: rtl; grid-column: 1; grid-row: 1; }
+  .harb-workspace-main { direction: rtl; grid-column: 1; grid-row: 1; }
+  .harb-mobile-brand, .harb-mobile-actions { display: flex !important; }
+  .harb-desktop-greeting, .harb-language-badge, .harb-mode-label { display: none !important; }
+  @media (min-width: 640px) {
+    .harb-language-badge { display: inline-flex !important; }
+    .harb-mode-label { display: inline !important; }
+  }
   @media (min-width: 1024px) {
-    .harb-assistant-layout { grid-template-columns: 17.25rem minmax(0, 1fr); }
+    .harb-assistant-layout { grid-template-columns: minmax(0, 1fr) 276px; }
+    .harb-sidebar { display: flex !important; width: 276px; grid-column: 2; }
+    .harb-workspace-main { grid-column: 1; }
+    .harb-mobile-brand, .harb-mobile-actions { display: none !important; }
+    .harb-desktop-greeting { display: block !important; }
+  }
+  .harb-command-label {
+    border: 1px solid oklch(0.79 0.144 169 / 22%);
+    background: oklch(0.79 0.144 169 / 8%);
+    color: oklch(0.86 0.09 169);
+    letter-spacing: 0.12em;
   }
 }
 
