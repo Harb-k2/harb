@@ -157,6 +157,22 @@ describe("Harb permission workflows", () => {
     expect(llm.invokeLLM).toHaveBeenCalledWith(expect.objectContaining({ messages: expect.arrayContaining([expect.objectContaining({ role: "system", content: expect.stringContaining("تحقق من التفويض قبل أي اختبار") })]) }));
   });
 
+  it("يستخدم نموذج المالك المعتمد ثم ينتقل إلى البديل عند تعذر الاستجابة", async () => {
+    db.getBaseModelSelection.mockResolvedValue({ id: "base-model-01", primaryModelId: "gpt-5", fallbackModelId: "gpt-5-mini", status: "approved" });
+    llm.invokeLLM.mockRejectedValueOnce(new Error("primary unavailable")).mockResolvedValueOnce({ choices: [{ message: { content: "تمت الاستجابة من البديل ضمن قانون المالك." } }] });
+
+    const result = await appRouter.createCaller(createContext()).harb.tasks.submit({
+      request: "حلل هذا التقرير ضمن حدود التفويض",
+      responseMode: "deep",
+      conversation: [{ role: "user", content: "أحتاج تحليلاً منظماً." }],
+    });
+
+    expect(result.message).toContain("البديل");
+    expect(llm.invokeLLM).toHaveBeenNthCalledWith(1, expect.objectContaining({ model: "gpt-5", reasoning: { effort: "high" }, maxCompletionTokens: 3600 }));
+    expect(llm.invokeLLM).toHaveBeenNthCalledWith(2, expect.objectContaining({ model: "gpt-5-mini" }));
+    expect(db.createAuditEntry).toHaveBeenCalledWith(7, expect.objectContaining({ eventType: "task.completed", metadata: expect.stringContaining('"usedFallback":true') }));
+  });
+
   it("يوثق قرار المالك عند الموافقة أو الرفض", async () => {
     const result = await appRouter.createCaller(createContext()).harb.approvals.resolve({ id: "approval-01", status: "approved" });
 

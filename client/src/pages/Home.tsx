@@ -1,5 +1,6 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { AIChatBox, type Message } from "@/components/AIChatBox";
+import { HarbAssistantWorkspace, type ResponseMode } from "@/components/HarbAssistantWorkspace";
 import { CyberOperationsPanel } from "@/components/CyberOperationsPanel";
 import { ModelLabPanel } from "@/components/ModelLabPanel";
 import { KnowledgeControlPanel } from "@/components/KnowledgeControlPanel";
@@ -201,6 +202,8 @@ export default function Home() {
   const { user, loading, isAuthenticated, logout } = useAuth();
   const utils = trpc.useUtils();
   const [messages, setMessages] = useState<Message[]>([]);
+  const [workspace, setWorkspace] = useState<"assistant" | "control">("assistant");
+  const [responseMode, setResponseMode] = useState<ResponseMode>("balanced");
   const [auditSearch, setAuditSearch] = useState("");
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -223,8 +226,12 @@ export default function Home() {
   const updateAgentScopes = trpc.harb.desktop.updateScopes.useMutation({ onSuccess: () => { toast.success("تم تحديث نطاقات الجهاز المتصل."); refresh(); }, onError: error => toast.error(error.message) });
 
   const handleSend = (request: string) => {
+    const conversation = messages
+      .filter(message => message.role === "user" || message.role === "assistant")
+      .slice(-8)
+      .map(message => ({ role: message.role as "user" | "assistant", content: message.content }));
     setMessages(current => [...current, { role: "user", content: request }]);
-    submitTask.mutate({ request });
+    submitTask.mutate({ request, responseMode, conversation });
   };
   const handleUpload = (file?: File) => {
     if (!file) return;
@@ -261,6 +268,22 @@ export default function Home() {
   const activeRules = rules.filter(rule => rule.isActive).length;
   const pendingApprovals = approvals.filter(item => item.status === "requested").length;
 
+  if (workspace === "assistant") {
+    return <HarbAssistantWorkspace
+      userName={user.name || "المالك"}
+      messages={messages}
+      isLoading={submitTask.isPending}
+      responseMode={responseMode}
+      activeRules={activeRules}
+      pendingApprovals={pendingApprovals}
+      taskCount={tasks.length}
+      onSendMessage={handleSend}
+      onResponseModeChange={setResponseMode}
+      onNewConversation={() => setMessages([])}
+      onOpenControlCenter={() => setWorkspace("control")}
+    />;
+  }
+
   return (
     <div className="harb-shell min-h-screen" dir="rtl">
       <div className="mx-auto grid min-h-screen max-w-[1600px] grid-cols-1 lg:grid-cols-[270px_minmax(0,1fr)]">
@@ -274,7 +297,7 @@ export default function Home() {
         </aside>
 
         <main className="min-w-0 p-4 sm:p-7">
-          <header className="mb-7 flex flex-col gap-4 border-b border-white/10 pb-6 sm:flex-row sm:items-center sm:justify-between"><div><p className="section-kicker">Harb / Operations</p><h1 className="mt-1 text-2xl font-bold tracking-tight sm:text-3xl">أهلاً بك، {user.name || "المالك"}</h1><p className="mt-1 text-sm text-muted-foreground">قرارات قابلة للتفسير قبل التنفيذ، وسجل موثوق بعده.</p></div><div className="flex items-center gap-2 self-start rounded-full border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-primary"><span className="status-dot" />Harb Core متصل <span className="text-primary/60">•</span> وضع محمي</div></header>
+          <header className="mb-7 flex flex-col gap-4 border-b border-white/10 pb-6 sm:flex-row sm:items-center sm:justify-between"><div><p className="section-kicker">Harb / Operations</p><h1 className="mt-1 text-2xl font-bold tracking-tight sm:text-3xl">أهلاً بك، {user.name || "المالك"}</h1><p className="mt-1 text-sm text-muted-foreground">قرارات قابلة للتفسير قبل التنفيذ، وسجل موثوق بعده.</p></div><div className="flex flex-wrap items-center gap-2 self-start"><Button variant="outline" onClick={() => setWorkspace("assistant")} className="rounded-full border-white/15 bg-white/5 text-xs"><MessageSquare className="ml-1.5 h-4 w-4" />فتح المحادثة</Button><div className="flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-primary"><span className="status-dot" />Harb Core متصل <span className="text-primary/60">•</span> وضع محمي</div></div></header>
 
           <section id="overview" className="scroll-mt-6"><div className="mb-4 flex items-center justify-between"><div><p className="section-kicker">الحالة التشغيلية</p><h2 className="mt-1 text-xl font-bold">نظرة عامة</h2></div><Badge variant="outline" className="border-primary/20 bg-primary/5 text-primary">آخر مزامنة الآن</Badge></div><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><Metric label="قوانين فعالة" value={activeRules} hint="تُفحص حسب الأولوية" icon={Gavel} /><Metric label="مهام مسجلة" value={tasks.length} hint="تشمل القرارات والنتائج" icon={Activity} /><Metric label="موافقات معلقة" value={pendingApprovals} hint="لن تنفذ قبل القرار" icon={KeyRound} /><Metric label="ملفات خاصة" value={files.length} hint="محفوظة مع بياناتها الوصفية" icon={FolderOpen} /></div></section>
 
