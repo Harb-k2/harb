@@ -126,7 +126,7 @@ export function HarbAssistantWorkspace({
   return (
     <div className="harb-shell min-h-screen" dir="rtl">
       <div className="harb-assistant-layout mx-auto max-w-[1720px]">
-        <aside className="harb-sidebar min-w-0 flex-col border-l border-white/10 bg-[#0d1520]/80 px-4 py-5 backdrop-blur-xl">
+        <aside className="harb-sidebar harb-command-sidebar min-w-0 flex-col border-l border-white/10 bg-[#0d1520]/80 px-4 py-5 backdrop-blur-xl">
           <div className="flex items-center gap-3 px-2">
             <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary text-lg font-black text-primary-foreground shadow-[0_12px_28px_oklch(0.79_0.144_169_/_18%)]">ح</div>
             <div>
@@ -173,7 +173,7 @@ export function HarbAssistantWorkspace({
         </aside>
 
         <main className="harb-workspace-main flex w-full min-w-0 flex-1 flex-col">
-          <header className="flex min-h-16 items-center justify-between border-b border-white/10 bg-[#0d1520]/70 px-4 py-3 backdrop-blur-xl sm:px-7">
+          <header className="harb-workspace-header flex min-h-16 items-center justify-between border-b border-white/10 bg-[#0d1520]/70 px-4 py-3 backdrop-blur-xl sm:px-7">
             <div className="min-w-0">
               <div className="harb-mobile-brand items-center gap-2"><span className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary text-sm font-black text-primary-foreground">ح</span><span className="font-bold">Harb</span></div>
               <div className="harb-desktop-greeting"><p className="text-sm font-semibold">مرحباً، {userName}</p><p className="mt-0.5 text-xs text-muted-foreground">مساعد واضح ومقيّد بقانون المالك</p></div>
@@ -184,14 +184,14 @@ export function HarbAssistantWorkspace({
             </div>
           </header>
 
-          <section className="flex min-h-0 flex-1 flex-col px-3 py-4 sm:px-6 sm:py-6">
+          <section className="harb-assistant-content flex min-h-0 flex-1 flex-col px-3 py-4 sm:px-6 sm:py-6">
             <div className="mx-auto flex w-full min-h-0 max-w-[1200px] flex-1 flex-col">
               <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="section-kicker">Harb Assistant / Command Console</p>
                   <h1 className="mt-1 text-xl font-bold tracking-tight sm:text-2xl">كيف يمكنني مساعدتك اليوم؟</h1>
                 </div>
-                <div className="flex w-full rounded-xl border border-white/10 bg-black/20 p-1 shadow-inner sm:w-auto" role="group" aria-label="مستوى عمق الإجابة">
+                <div className="harb-response-mode flex w-full rounded-xl border border-white/10 bg-black/20 p-1 shadow-inner sm:w-auto" role="group" aria-label="مستوى عمق الإجابة">
                   {responseModes.map(mode => (
                     <button
                       key={mode.id}
@@ -207,7 +207,7 @@ export function HarbAssistantWorkspace({
                 </div>
               </div>
 
-              <div className="assistant-chat-frame min-h-0 flex-1 overflow-hidden rounded-[1.5rem] border border-white/10 bg-[#111b28]/85 shadow-[0_24px_60px_oklch(0_0_0_/_22%)]">
+              <div className="assistant-chat-frame harb-chat-surface min-h-0 flex-1 overflow-hidden rounded-[1.5rem] border border-white/10 bg-[#111b28]/85 shadow-[0_24px_60px_oklch(0_0_0_/_22%)]">
                 <AIChatBox
                   messages={messages}
                   onSendMessage={onSendMessage}
@@ -229,14 +229,14 @@ export function HarbAssistantWorkspace({
                 />
               </div>
 
-              <div className="mt-3 flex items-center justify-between gap-3 px-1 text-[11px] text-muted-foreground">
+              <div className="harb-security-notice mt-3 flex items-center justify-between gap-3 px-1 text-[11px] text-muted-foreground">
                 <span className="flex items-center gap-1.5"><ShieldCheck className="h-3.5 w-3.5 text-primary" />لا تُنفّذ الإجراءات الحساسة تلقائياً.</span>
                 <span className="harb-mode-label">نمط الإجابة: {selectedMode.label} · لغة الرد تتبع رسالتك</span>
               </div>
             </div>
           </section>
 
-          {isCompactViewport && <div className="harb-mobile-actions items-center gap-2 border-t border-white/10 bg-[#0d1520]/65 px-3 py-2">
+          {isCompactViewport && <div className="harb-mobile-actions harb-mobile-command-bar items-center gap-2 border-t border-white/10 bg-[#0d1520]/65 px-3 py-2">
             <Button variant="ghost" size="sm" className="flex-1 text-xs text-primary" onClick={onNewConversation}><MessageSquarePlus className="ml-1.5 h-4 w-4" />محادثة جديدة</Button>
             <Button variant="ghost" size="sm" className="flex-1 text-xs" onClick={onOpenControlCenter}>مركز العمليات<ChevronLeft className="mr-1.5 h-4 w-4" /></Button>
           </div>}
