@@ -279,6 +279,7 @@ export default function Home() {
   });
   const uploadConversationAttachment = trpc.harb.conversations.attachments.upload.useMutation({ onError: error => toast.error(error.message) });
   const summarizePdfAttachment = trpc.harb.conversations.attachments.summarizePdf.useMutation();
+  const ocrAttachment = trpc.harb.conversations.attachments.ocrAndSummarize.useMutation();
   const createRule = trpc.harb.rules.create.useMutation({ onSuccess: () => { toast.success("تمت إضافة القاعدة."); refresh(); }, onError: error => toast.error(error.message) });
   const updateRule = trpc.harb.rules.update.useMutation({ onSuccess: () => { toast.success("تم تحديث القانون."); refresh(); }, onError: error => toast.error(error.message) });
   const resolveApproval = trpc.harb.approvals.resolve.useMutation({ onSuccess: () => { toast.success("تم تسجيل القرار في سجل التدقيق."); refresh(); }, onError: error => toast.error(error.message) });
@@ -326,6 +327,13 @@ export default function Home() {
         if (controller.signal.aborted) throw new DOMException("تم إلغاء رفع المرفق.", "AbortError");
         const previewUrl = file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined;
         setPendingAttachments(current => [...current, { ...attachment, previewUrl }]);
+        const runOcr = async () => {
+          setAttachmentProgress({ stage: "ocr", current: index + 1, total: selected.length, fileName: file.name });
+          const ocr = await ocrAttachment.mutateAsync({ conversationId, attachmentId: attachment.id });
+          if (controller.signal.aborted) throw new DOMException("تم إلغاء رفع المرفق.", "AbortError");
+          setMessages(current => [...current, { id: ocr.assistantMessage.id, role: "assistant", content: ocr.message }]);
+          void utils.harb.conversations.get.invalidate();
+        };
         if (attachment.mimeType === "application/pdf") {
           setAttachmentProgress({ stage: "extracting", current: index + 1, total: selected.length, fileName: file.name });
           try {
@@ -333,9 +341,17 @@ export default function Home() {
             if (controller.signal.aborted) throw new DOMException("تم إلغاء رفع المرفق.", "AbortError");
             setMessages(current => [...current, { id: summary.assistantMessage.id, role: "assistant", content: summary.message }]);
             void utils.harb.conversations.get.invalidate();
+            if (summary.status === "no_text") await runOcr();
           } catch (summaryError) {
             if (summaryError instanceof DOMException && summaryError.name === "AbortError") throw summaryError;
             toast.error(summaryError instanceof Error ? summaryError.message : "تعذر إنشاء ملخص PDF السريع.");
+          }
+        } else if (attachment.kind === "image") {
+          try {
+            await runOcr();
+          } catch (ocrError) {
+            if (ocrError instanceof DOMException && ocrError.name === "AbortError") throw ocrError;
+            toast.error(ocrError instanceof Error ? ocrError.message : "تعذر استخراج النص من الصورة.");
           }
         }
         setAttachmentProgress({ stage: "ready", current: index + 1, total: selected.length, fileName: file.name });

@@ -252,6 +252,20 @@ describe("Harb permission workflows", () => {
     expect(db.createAuditEntry).toHaveBeenCalledWith(7, expect.objectContaining({ eventType: "conversation.pdf_summary", outcome: "completed" }));
   });
 
+  it("يشغّل OCR مرئياً لصورة خاصة ويحفظ الملخص ضمن محادثة المالك", async () => {
+    const attachment = { id: "attachment-ocr-01", conversationId: "conversation-01", originalName: "scanned-note.png", mimeType: "image/png", size: 640, storageKey: "owners/7/conversations/conversation-01/scanned-note.png", storageUrl: "/manus-storage/scanned-note.png", kind: "image", analysisStatus: "ready" };
+    db.getConversation.mockResolvedValue({ id: "conversation-01", title: "محادثة جديدة", detectedLanguage: "arabic" });
+    db.getConversationAttachmentsByIds.mockResolvedValue([attachment]);
+
+    const result = await appRouter.createCaller(createContext()).harb.conversations.attachments.ocrAndSummarize({ conversationId: "conversation-01", attachmentId: "attachment-ocr-01" });
+
+    expect(result.status).toBe("completed");
+    expect(storage.storageGetSignedUrl).toHaveBeenCalledWith(attachment.storageKey);
+    expect(llm.invokeLLM).toHaveBeenCalledWith(expect.objectContaining({ messages: expect.arrayContaining([expect.objectContaining({ role: "user", content: expect.arrayContaining([expect.objectContaining({ type: "image_url", image_url: expect.objectContaining({ url: "https://signed.example/evidence.png", detail: "high" }) })]) })]) }));
+    expect(db.createConversationMessage).toHaveBeenCalledWith(7, expect.objectContaining({ conversationId: "conversation-01", role: "assistant", content: expect.stringContaining("OCR") }));
+    expect(db.createAuditEntry).toHaveBeenCalledWith(7, expect.objectContaining({ eventType: "conversation.ocr", outcome: "completed" }));
+  });
+
   it("يسجل تقييم المالك لرد محفوظ داخل محادثته فقط", async () => {
     db.listConversationMessages.mockResolvedValue([{ id: "message-01", role: "assistant", content: "رد محفوظ" }]);
     db.upsertMessageFeedback.mockResolvedValue({ id: "feedback-01", messageId: "message-01", rating: "up" });
