@@ -1,4 +1,4 @@
-import { AIChatBox, type ChatAttachment, type Message } from "@/components/AIChatBox";
+import { AIChatBox, type AttachmentUploadProgress, type ChatAttachment, type Message } from "@/components/AIChatBox";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -39,6 +39,8 @@ type HarbAssistantWorkspaceProps = {
   onRateMessage: (messageId: string, rating: "up" | "down") => void;
   pendingAttachments: ChatAttachment[];
   isUploadingAttachments: boolean;
+  attachmentProgress: AttachmentUploadProgress | null;
+  isAnalyzingAttachments: boolean;
   onSelectFiles: (files: File[]) => void;
   onRemoveAttachment: (attachmentId: string) => void;
 };
@@ -103,6 +105,8 @@ export function HarbAssistantWorkspace({
   onRateMessage,
   pendingAttachments,
   isUploadingAttachments,
+  attachmentProgress,
+  isAnalyzingAttachments,
   onSelectFiles,
   onRemoveAttachment,
 }: HarbAssistantWorkspaceProps) {
@@ -215,6 +219,8 @@ export function HarbAssistantWorkspace({
                   onRateMessage={onRateMessage}
                   pendingAttachments={pendingAttachments}
                   isUploadingAttachments={isUploadingAttachments}
+                  attachmentProgress={attachmentProgress}
+                  isAnalyzingAttachments={isAnalyzingAttachments}
                   onSelectFiles={onSelectFiles}
                   onRemoveAttachment={onRemoveAttachment}
                 />

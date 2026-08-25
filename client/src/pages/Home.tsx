@@ -1,5 +1,5 @@
 import { useAuth } from "@/_core/hooks/useAuth";
-import { AIChatBox, type ChatAttachment, type Message } from "@/components/AIChatBox";
+import { AIChatBox, type AttachmentUploadProgress, type ChatAttachment, type Message } from "@/components/AIChatBox";
 import { HarbAssistantWorkspace, type ResponseMode } from "@/components/HarbAssistantWorkspace";
 import { CyberOperationsPanel } from "@/components/CyberOperationsPanel";
 import { ModelLabPanel } from "@/components/ModelLabPanel";
@@ -221,6 +221,8 @@ export default function Home() {
   const [activeConversationId, setActiveConversationId] = useState<string | undefined>();
   const [pendingAttachments, setPendingAttachments] = useState<ChatAttachment[]>([]);
   const [isUploadingChatAttachments, setIsUploadingChatAttachments] = useState(false);
+  const [attachmentProgress, setAttachmentProgress] = useState<AttachmentUploadProgress | null>(null);
+  const [isAnalyzingAttachments, setIsAnalyzingAttachments] = useState(false);
   const [auditSearch, setAuditSearch] = useState("");
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -248,14 +250,15 @@ export default function Home() {
       setActiveConversationId(result.conversationId);
       setMessages(current => [...current.filter(message => Boolean(message.id)), { id: result.userMessage.id, role: "user", content: result.userMessage.content, attachments: result.attachments }, { id: result.assistantMessage.id, role: "assistant", content: result.message }]);
       setPendingAttachments([]);
+      setIsAnalyzingAttachments(false);
       void utils.harb.conversations.list.invalidate();
       void utils.harb.conversations.get.invalidate();
       refresh();
     },
-    onError: error => setMessages(current => [...current, { role: "assistant", content: `**تعذر إكمال الطلب.**\n\n${error.message}` }]),
+    onError: error => { setIsAnalyzingAttachments(false); setMessages(current => [...current, { role: "assistant", content: `**تعذر إكمال الطلب.**\n\n${error.message}` }]); },
   });
   const createConversation = trpc.harb.conversations.create.useMutation({
-    onSuccess: conversation => { setActiveConversationId(conversation.id); setMessages([]); setPendingAttachments([]); void utils.harb.conversations.list.invalidate(); },
+    onSuccess: conversation => { setActiveConversationId(conversation.id); setMessages([]); setPendingAttachments([]); setAttachmentProgress(null); void utils.harb.conversations.list.invalidate(); },
     onError: error => toast.error(error.message),
   });
   const rateMessage = trpc.harb.conversations.feedback.useMutation({
@@ -279,6 +282,7 @@ export default function Home() {
       .slice(-8)
       .map(message => ({ role: message.role as "user" | "assistant", content: message.content }));
     setMessages(current => [...current, { role: "user", content: request, attachments: pendingAttachments }]);
+    setIsAnalyzingAttachments(pendingAttachments.length > 0);
     submitTask.mutate({ request, responseMode, conversationId: activeConversationId, attachmentIds: pendingAttachments.map(attachment => attachment.id), conversation });
   };
   const handleChatAttachments = async (files: File[]) => {
@@ -296,14 +300,21 @@ export default function Home() {
         const conversation = await createConversation.mutateAsync({ title: "محادثة جديدة" });
         conversationId = conversation.id;
       }
-      for (const file of selected) {
-        const attachment = await uploadConversationAttachment.mutateAsync({ conversationId, name: file.name, mimeType: file.type, base64: await fileToBase64(file) });
+      for (let index = 0; index < selected.length; index += 1) {
+        const file = selected[index];
+        setAttachmentProgress({ stage: "preparing", current: index + 1, total: selected.length, fileName: file.name });
+        const base64 = await fileToBase64(file);
+        setAttachmentProgress({ stage: "uploading", current: index + 1, total: selected.length, fileName: file.name });
+        const attachment = await uploadConversationAttachment.mutateAsync({ conversationId, name: file.name, mimeType: file.type, base64 });
         setPendingAttachments(current => [...current, attachment]);
+        setAttachmentProgress({ stage: "ready", current: index + 1, total: selected.length, fileName: file.name });
       }
       void utils.harb.conversations.get.invalidate();
       void utils.harb.conversations.list.invalidate();
+      window.setTimeout(() => setAttachmentProgress(null), 900);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "تعذر رفع المرفق.");
+      setAttachmentProgress(null);
     } finally {
       setIsUploadingChatAttachments(false);
     }
@@ -367,6 +378,8 @@ export default function Home() {
       }}
       pendingAttachments={pendingAttachments}
       isUploadingAttachments={isUploadingChatAttachments}
+      attachmentProgress={attachmentProgress}
+      isAnalyzingAttachments={isAnalyzingAttachments}
       onSelectFiles={files => { void handleChatAttachments(files); }}
       onRemoveAttachment={attachmentId => setPendingAttachments(current => current.filter(attachment => attachment.id !== attachmentId))}
     />;

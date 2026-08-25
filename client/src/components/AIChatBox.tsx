@@ -15,6 +15,13 @@ export type ChatAttachment = {
   storageUrl?: string;
 };
 
+export type AttachmentUploadProgress = {
+  stage: "preparing" | "uploading" | "ready";
+  current: number;
+  total: number;
+  fileName: string;
+};
+
 export type Message = {
   id?: string;
   role: "system" | "user" | "assistant";
@@ -35,6 +42,8 @@ export type AIChatBoxProps = {
   onRateMessage?: (messageId: string, rating: "up" | "down") => void;
   pendingAttachments?: ChatAttachment[];
   isUploadingAttachments?: boolean;
+  attachmentProgress?: AttachmentUploadProgress | null;
+  isAnalyzingAttachments?: boolean;
   onSelectFiles?: (files: File[]) => void;
   onRemoveAttachment?: (attachmentId: string) => void;
 };
@@ -52,6 +61,8 @@ export function AIChatBox({
   onRateMessage,
   pendingAttachments = [],
   isUploadingAttachments = false,
+  attachmentProgress,
+  isAnalyzingAttachments = false,
   onSelectFiles,
   onRemoveAttachment,
 }: AIChatBoxProps) {
@@ -60,6 +71,9 @@ export function AIChatBox({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const displayMessages = messages.filter(message => message.role !== "system");
+  const progressStageLabel = attachmentProgress?.stage === "preparing" ? "يجري تجهيز المرفق" : attachmentProgress?.stage === "uploading" ? "يجري رفع المرفق بشكل خاص" : "أصبح المرفق جاهزاً للتحليل";
+  const progressWithinStage = attachmentProgress?.stage === "preparing" ? 25 : attachmentProgress?.stage === "uploading" ? 70 : 100;
+  const attachmentProgressPercent = attachmentProgress ? Math.round((((attachmentProgress.current - 1) + progressWithinStage / 100) / attachmentProgress.total) * 100) : 0;
 
   const scrollToBottom = () => {
     const viewport = scrollAreaRef.current?.querySelector("[data-radix-scroll-area-viewport]") as HTMLDivElement | null;
@@ -135,7 +149,7 @@ export function AIChatBox({
               {isLoading && (
                 <article className="flex items-start justify-end gap-3" aria-live="polite">
                   <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-primary/12 text-primary"><Sparkles className="size-4" /></div>
-                  <div className="rounded-2xl rounded-tl-sm border border-white/8 bg-white/[0.045] px-4 py-3"><div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin text-primary" />يحضّر Harb الإجابة…</div></div>
+                  <div className="rounded-2xl rounded-tl-sm border border-white/8 bg-white/[0.045] px-4 py-3"><div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin text-primary" />{isAnalyzingAttachments ? "يحلّل Harb المرفقات ضمن قانون المالك…" : "يحضّر Harb الإجابة…"}</div></div>
                 </article>
               )}
             </div>
@@ -143,7 +157,7 @@ export function AIChatBox({
         )}
       </div>
       <form onSubmit={handleSubmit} className="mx-3 mb-3 rounded-2xl border border-white/12 bg-[#0b121c]/85 p-2 shadow-[0_12px_32px_oklch(0_0_0_/_18%)] sm:mx-5 sm:mb-5">
-        {(pendingAttachments.length > 0 || isUploadingAttachments) && <div className="mb-2 flex flex-wrap gap-1.5 border-b border-white/8 px-1 pb-2">{pendingAttachments.map(attachment => <span key={attachment.id} className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-primary/20 bg-primary/8 px-2 py-1 text-[11px] text-foreground"><span className="text-primary">{attachment.kind === "image" ? <Image className="size-3.5" /> : <FileText className="size-3.5" />}</span><span className="max-w-40 truncate">{attachment.originalName}</span><button type="button" aria-label={`إزالة ${attachment.originalName}`} onClick={() => onRemoveAttachment?.(attachment.id)} className="rounded p-0.5 text-muted-foreground hover:bg-white/10 hover:text-foreground"><X className="size-3" /></button></span>)}{isUploadingAttachments && <span className="inline-flex items-center gap-1.5 rounded-lg bg-white/5 px-2 py-1 text-[11px] text-muted-foreground"><Loader2 className="size-3 animate-spin text-primary" />يجري رفع المرفق…</span>}</div>}
+        {(pendingAttachments.length > 0 || isUploadingAttachments || attachmentProgress) && <div className="mb-2 border-b border-white/8 px-1 pb-2"><div className="flex flex-wrap gap-1.5">{pendingAttachments.map(attachment => <span key={attachment.id} className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-primary/20 bg-primary/8 px-2 py-1 text-[11px] text-foreground"><span className="text-primary">{attachment.kind === "image" ? <Image className="size-3.5" /> : <FileText className="size-3.5" />}</span><span className="max-w-40 truncate">{attachment.originalName}</span><button type="button" aria-label={`إزالة ${attachment.originalName}`} onClick={() => onRemoveAttachment?.(attachment.id)} className="rounded p-0.5 text-muted-foreground hover:bg-white/10 hover:text-foreground"><X className="size-3" /></button></span>)}</div>{attachmentProgress ? <div className="mt-2 rounded-xl border border-primary/15 bg-primary/5 px-2.5 py-2" role="status" aria-live="polite"><div className="flex items-center justify-between gap-3 text-[11px]"><span className="flex min-w-0 items-center gap-1.5 text-foreground"><Loader2 className={cn("size-3.5 shrink-0 text-primary", attachmentProgress.stage === "ready" ? "" : "animate-spin")} /> <span className="truncate">{progressStageLabel}: {attachmentProgress.fileName}</span></span><span className="shrink-0 text-primary">{attachmentProgressPercent}%</span></div><div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-black/25" role="progressbar" aria-label="تقدم رفع المرفق" aria-valuemin={0} aria-valuemax={100} aria-valuenow={attachmentProgressPercent}><div className="h-full rounded-full bg-primary transition-[width] duration-300 ease-out" style={{ width: `${attachmentProgressPercent}%` }} /></div></div> : isUploadingAttachments ? <span className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-white/5 px-2 py-1 text-[11px] text-muted-foreground"><Loader2 className="size-3 animate-spin text-primary" />يجري رفع المرفق…</span> : null}</div>}
         <div className="flex items-end gap-2">
           <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/webp,application/pdf" multiple style={{ display: "none" }} onChange={handleFiles} />
           <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isLoading || isUploadingAttachments || !onSelectFiles} aria-label="إرفاق صورة أو ملف PDF" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-white/8 hover:text-primary disabled:cursor-not-allowed disabled:opacity-40"><Paperclip className="size-4" /></button>
