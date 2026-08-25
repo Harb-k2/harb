@@ -123,6 +123,10 @@ function fileToBase64(file: File, signal?: AbortSignal) {
   });
 }
 
+function revokeAttachmentPreview(attachment: ChatAttachment) {
+  if (attachment.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(attachment.previewUrl);
+}
+
 function classificationLabel(value: "private" | "restricted" | "shared") {
   return value === "private" ? "خاص" : value === "restricted" ? "مقيّد" : "مشترك";
 }
@@ -257,7 +261,7 @@ export default function Home() {
     onSuccess: result => {
       setActiveConversationId(result.conversationId);
       setMessages(current => [...current.filter(message => Boolean(message.id)), { id: result.userMessage.id, role: "user", content: result.userMessage.content, attachments: result.attachments }, { id: result.assistantMessage.id, role: "assistant", content: result.message }]);
-      setPendingAttachments([]);
+      setPendingAttachments(current => { current.forEach(revokeAttachmentPreview); return []; });
       setIsAnalyzingAttachments(false);
       void utils.harb.conversations.list.invalidate();
       void utils.harb.conversations.get.invalidate();
@@ -266,7 +270,7 @@ export default function Home() {
     onError: error => { setIsAnalyzingAttachments(false); setMessages(current => [...current, { role: "assistant", content: `**تعذر إكمال الطلب.**\n\n${error.message}` }]); },
   });
   const createConversation = trpc.harb.conversations.create.useMutation({
-    onSuccess: conversation => { setActiveConversationId(conversation.id); setMessages([]); setPendingAttachments([]); setAttachmentProgress(null); void utils.harb.conversations.list.invalidate(); },
+    onSuccess: conversation => { setActiveConversationId(conversation.id); setMessages([]); setPendingAttachments(current => { current.forEach(revokeAttachmentPreview); return []; }); setAttachmentProgress(null); void utils.harb.conversations.list.invalidate(); },
     onError: error => toast.error(error.message),
   });
   const rateMessage = trpc.harb.conversations.feedback.useMutation({
@@ -319,7 +323,8 @@ export default function Home() {
         setAttachmentProgress({ stage: "uploading", current: index + 1, total: selected.length, fileName: file.name });
         const attachment = await uploadConversationAttachment.mutateAsync({ conversationId, name: file.name, mimeType: file.type, base64 });
         if (controller.signal.aborted) throw new DOMException("تم إلغاء رفع المرفق.", "AbortError");
-        setPendingAttachments(current => [...current, attachment]);
+        const previewUrl = file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined;
+        setPendingAttachments(current => [...current, { ...attachment, previewUrl }]);
         setAttachmentProgress({ stage: "ready", current: index + 1, total: selected.length, fileName: file.name });
       }
       void utils.harb.conversations.get.invalidate();
@@ -393,7 +398,7 @@ export default function Home() {
       conversations={conversations.data ?? []}
       activeConversationId={activeConversationId}
       feedbackByMessage={feedbackByMessage}
-      onSelectConversation={conversationId => { setActiveConversationId(conversationId); setMessages([]); setPendingAttachments([]); }}
+      onSelectConversation={conversationId => { setActiveConversationId(conversationId); setMessages([]); setPendingAttachments(current => { current.forEach(revokeAttachmentPreview); return []; }); }}
       onRateMessage={(messageId, rating) => {
         if (!activeConversationId) return;
         rateMessage.mutate({ messageId, conversationId: activeConversationId, rating });
@@ -404,7 +409,7 @@ export default function Home() {
       isAnalyzingAttachments={isAnalyzingAttachments}
       onSelectFiles={files => { void handleChatAttachments(files); }}
       onCancelUpload={cancelChatAttachmentUpload}
-      onRemoveAttachment={attachmentId => setPendingAttachments(current => current.filter(attachment => attachment.id !== attachmentId))}
+      onRemoveAttachment={attachmentId => setPendingAttachments(current => { const attachment = current.find(item => item.id === attachmentId); if (attachment) revokeAttachmentPreview(attachment); return current.filter(item => item.id !== attachmentId); })}
     />;
   }
 
