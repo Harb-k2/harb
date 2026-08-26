@@ -6,6 +6,7 @@ import { ModelLabPanel } from "@/components/ModelLabPanel";
 import { BenchmarkPanel } from "@/components/BenchmarkPanel";
 import { KnowledgeControlPanel } from "@/components/KnowledgeControlPanel";
 import { TechnicalStudioPanel } from "@/components/TechnicalStudioPanel";
+import { WorkspaceBatchUpload } from "@/components/WorkspaceBatchUpload";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -26,7 +27,6 @@ import {
   FileText,
   FolderOpen,
   Gavel,
-  HardDriveUpload,
   KeyRound,
   Laptop,
   Loader2,
@@ -238,7 +238,6 @@ export default function Home() {
   const [isAnalyzingAttachments, setIsAnalyzingAttachments] = useState(false);
   const [auditSearch, setAuditSearch] = useState("");
   const [pairingCode, setPairingCode] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const attachmentUploadAbortRef = useRef<AbortController | null>(null);
   const attachmentProgressTimerRef = useRef<number | null>(null);
   const dashboard = trpc.harb.dashboard.useQuery(undefined, { enabled: isAuthenticated });
@@ -292,7 +291,6 @@ export default function Home() {
   const createRule = trpc.harb.rules.create.useMutation({ onSuccess: () => { toast.success("تمت إضافة القاعدة."); refresh(); }, onError: error => toast.error(error.message) });
   const updateRule = trpc.harb.rules.update.useMutation({ onSuccess: () => { toast.success("تم تحديث القانون."); refresh(); }, onError: error => toast.error(error.message) });
   const resolveApproval = trpc.harb.approvals.resolve.useMutation({ onSuccess: () => { toast.success("تم تسجيل القرار في سجل التدقيق."); refresh(); }, onError: error => toast.error(error.message) });
-  const uploadFile = trpc.harb.files.upload.useMutation({ onSuccess: () => { toast.success("تم حفظ الملف في مساحة العمل الخاصة."); refresh(); }, onError: error => toast.error(error.message) });
   const updateFileClassification = trpc.harb.files.updateClassification.useMutation({ onSuccess: () => { toast.success("تم تحديث تصنيف الملف وتسجيل القرار."); refresh(); }, onError: error => toast.error(error.message) });
   const requestFileApproval = trpc.harb.files.requestApproval.useMutation({ onSuccess: () => { toast.success("أُضيف طلب الموافقة إلى سجل الملف."); refresh(); }, onError: error => toast.error(error.message) });
   const resolveFileApproval = trpc.harb.files.resolveApproval.useMutation({ onSuccess: () => { toast.success("تم تسجيل قرار الملف."); refresh(); }, onError: error => toast.error(error.message) });
@@ -383,17 +381,6 @@ export default function Home() {
     setAttachmentProgress(null);
     setIsUploadingChatAttachments(false);
     toast.info("تم إلغاء رفع المرفق. لن يُربط أي مرفق ملغى برسالتك.");
-  };
-  const handleUpload = (file?: File) => {
-    if (!file) return;
-    if (file.size > 10_000_000) return toast.error("يدعم الإصدار الأول ملفات حتى 10 ميغابايت.");
-    const reader = new FileReader();
-    reader.onload = () => {
-      const base64 = String(reader.result).split(",")[1];
-      if (!base64) return toast.error("تعذر قراءة الملف.");
-      uploadFile.mutate({ name: file.name, mimeType: file.type || "application/octet-stream", base64, classification: "private" });
-    };
-    reader.readAsDataURL(file);
   };
 
   if (loading) return <div className="harb-shell flex min-h-screen items-center justify-center"><Loader2 className="h-7 w-7 animate-spin text-primary" /></div>;
@@ -497,7 +484,7 @@ export default function Home() {
           </section>
 
           <section id="files" className="mt-7 grid scroll-mt-6 gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(310px,0.8fr)]">
-            <div className="glass-panel rounded-2xl p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="section-kicker">Workspace</p><h2 className="mt-1 text-lg font-bold">مساحة الملفات</h2></div><input ref={fileInputRef} type="file" className="hidden" onChange={event => handleUpload(event.target.files?.[0])} /><Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={uploadFile.isPending} className="rounded-xl border-white/15 bg-white/5"><HardDriveUpload className="ml-2 h-4 w-4" />{uploadFile.isPending ? "جارٍ الحفظ…" : "رفع ملف"}</Button></div><p className="mt-2 text-xs text-muted-foreground">تُخزّن الملفات خاصةً افتراضياً، ويمكن للمالك إعادة تصنيفها. لا يعني التصنيف المشترك إرسال الملف تلقائياً؛ تبقى المشاركة خاضعة للقوانين والموافقة.</p><div className="mt-5 space-y-2">{files.length ? files.map(file => <article key={file.id} className="flex flex-col gap-3 rounded-xl border border-white/8 bg-black/10 p-3 sm:flex-row sm:items-center"><a href={file.storageUrl} target="_blank" rel="noreferrer" className="flex min-w-0 flex-1 items-center gap-3 transition-colors hover:text-primary"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/5"><FileText className="h-4 w-4 text-primary" /></span><span className="min-w-0"><span className="block truncate text-sm font-medium">{file.name}</span><span className="mt-1 block text-xs text-muted-foreground">{file.mimeType} · {formatBytes(file.size)} · {formatDate(file.createdAt)}</span></span></a><div className="flex items-center gap-2 self-end sm:self-auto"><select aria-label={`تصنيف ${file.name}`} value={file.classification} onChange={event => updateFileClassification.mutate({ id: file.id, classification: event.target.value as "private" | "restricted" | "shared" })} className="h-8 rounded-md border border-white/15 bg-background px-2 text-xs"><option value="private">خاص</option><option value="restricted">مقيّد</option><option value="shared">مشترك</option></select><Badge variant="outline" className="border-white/10 text-[10px] text-muted-foreground">{classificationLabel(file.classification)}</Badge></div><p className="w-full text-[11px] text-muted-foreground sm:hidden">{file.classification === "private" ? "محمي داخل مساحة العمل" : file.classification === "restricted" ? "أي تعديل أو مشاركة يحتاج موافقة" : "لا يزال الإرسال الخارجي خاضعاً للقوانين"}</p></article>) : <div className="rounded-xl border border-dashed border-white/15 p-7 text-center"><FolderOpen className="mx-auto h-7 w-7 text-muted-foreground" /><p className="mt-3 text-sm font-medium">مساحة عمل فارغة</p><p className="mt-1 text-xs text-muted-foreground">ارفع ملفاً لربطه بمهام Harb وسجل التدقيق.</p></div>}</div></div>
+            <div className="glass-panel rounded-2xl p-5"><div><p className="section-kicker">Workspace</p><h2 className="mt-1 text-lg font-bold">مساحة الملفات والمشاريع</h2></div><p className="mt-2 text-xs text-muted-foreground">تُخزّن الملفات خاصةً افتراضياً، ويمكن للمالك إعادة تصنيفها. لا يعني التصنيف المشترك إرسال الملف تلقائياً؛ تبقى المشاركة خاضعة للقوانين والموافقة.</p><div className="mt-5"><WorkspaceBatchUpload /></div><div className="mt-5 space-y-2">{files.length ? files.map(file => <article key={file.id} className="flex flex-col gap-3 rounded-xl border border-white/8 bg-black/10 p-3 sm:flex-row sm:items-center"><a href={file.storageUrl} target="_blank" rel="noreferrer" className="flex min-w-0 flex-1 items-center gap-3 transition-colors hover:text-primary"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/5"><FileText className="h-4 w-4 text-primary" /></span><span className="min-w-0"><span className="block truncate text-sm font-medium">{file.name}</span><span className="mt-1 block text-xs text-muted-foreground">{file.mimeType} · {formatBytes(file.size)} · {formatDate(file.createdAt)}</span></span></a><div className="flex items-center gap-2 self-end sm:self-auto"><select aria-label={`تصنيف ${file.name}`} value={file.classification} onChange={event => updateFileClassification.mutate({ id: file.id, classification: event.target.value as "private" | "restricted" | "shared" })} className="h-8 rounded-md border border-white/15 bg-background px-2 text-xs"><option value="private">خاص</option><option value="restricted">مقيّد</option><option value="shared">مشترك</option></select><Badge variant="outline" className="border-white/10 text-[10px] text-muted-foreground">{classificationLabel(file.classification)}</Badge></div><p className="w-full text-[11px] text-muted-foreground sm:hidden">{file.classification === "private" ? "محمي داخل مساحة العمل" : file.classification === "restricted" ? "أي تعديل أو مشاركة يحتاج موافقة" : "لا يزال الإرسال الخارجي خاضعاً للقوانين"}</p></article>) : <div className="rounded-xl border border-dashed border-white/15 p-7 text-center"><FolderOpen className="mx-auto h-7 w-7 text-muted-foreground" /><p className="mt-3 text-sm font-medium">مساحة عمل فارغة</p><p className="mt-1 text-xs text-muted-foreground">ارفع دفعة ملفات لربطها بمهام Harb وسجل التدقيق.</p></div>}</div></div>
             <div className="glass-panel rounded-2xl p-5"><div className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-300/10 text-amber-200"><LockKeyhole className="h-5 w-5" /></span><div><p className="section-kicker text-amber-200">Consent Queue</p><h2 className="mt-1 text-lg font-bold">موافقات صريحة</h2></div></div><div className="mt-5 space-y-3">{approvals.filter(item => item.status === "requested").length ? approvals.filter(item => item.status === "requested").map(item => <article key={item.id} className="rounded-xl border border-amber-200/15 bg-amber-300/5 p-3"><p className="text-sm font-medium leading-6">{item.summary}</p><p className="mt-2 text-xs text-muted-foreground">نوع العملية: {scopeLabels[item.action as RuleScope] || item.action} · تنتهي {formatDate(item.expiresAt)}</p><div className="mt-3 flex gap-2"><Button size="sm" onClick={() => resolveApproval.mutate({ id: item.id, status: "approved" })} className="h-8 bg-primary text-primary-foreground"><CheckCircle2 className="ml-1 h-3.5 w-3.5" />موافقة</Button><Button size="sm" variant="outline" onClick={() => resolveApproval.mutate({ id: item.id, status: "rejected" })} className="h-8 border-rose-200/20 text-rose-200 hover:bg-rose-400/10">رفض</Button></div></article>) : <div className="rounded-xl border border-dashed border-white/15 p-5 text-center"><ShieldCheck className="mx-auto h-6 w-6 text-primary" /><p className="mt-2 text-sm font-medium">لا توجد موافقات معلقة</p><p className="mt-1 text-xs text-muted-foreground">تظهر هنا العمليات الحساسة فقط.</p></div>}</div></div>
           </section>
 

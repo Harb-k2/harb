@@ -89,6 +89,7 @@ import { indexKnowledgeStorageObject } from "./knowledgeIndex";
 import { storageGetSignedUrl, storagePut } from "./storage";
 import { artifactMimeTypes, createDocumentArtifact, createProjectArchive, createProjectPreview, extractProjectArchiveFile, safeArtifactSlug, type ArtifactFormat } from "./technicalArtifacts";
 import { buildSearchRequests, extractSearchSources, isTrustedSourceUrl, needsTrustedSources, type SearchSource, type WebSearchMode } from "./webSearch";
+import { inspectWorkspaceBuffer, validateWorkspaceUpload, workspaceUploadLimits } from "./workspaceInspector";
 
 const scopeSchema = z.enum(["all", "general", "command", "file_change", "data_share"]);
 const actionSchema = z.enum(["allow", "approval", "deny"]);
@@ -1120,8 +1121,9 @@ export const appRouter = router({
         base64: z.string().min(1).max(14_000_000),
         classification: z.enum(["private", "restricted", "shared"]).default("private"),
       })).mutation(async ({ ctx, input }) => {
+        if (!isBase64Payload(input.base64)) throw new Error("صيغة ملف الرفع غير صالحة.");
         const buffer = Buffer.from(input.base64, "base64");
-        if (buffer.length > 10_000_000) throw new Error("الحد الأقصى للإصدار الأول هو 10 ميغابايت للملف الواحد.");
+        const kind = validateWorkspaceUpload(input.name, input.mimeType, buffer.length);
         const fileId = nanoid();
         const safeName = input.name.replace(/[^\w.\-\u0600-\u06FF]+/g, "-");
         const { key, url } = await storagePut(`${ctx.user.id}/harb/${fileId}-${safeName}`, buffer, input.mimeType);
@@ -1142,9 +1144,29 @@ export const appRouter = router({
           outcome: "stored",
           summary: `تم رفع الملف «${input.name}» إلى مساحة العمل الخاصة.`,
           ruleIds: "",
-          metadata: JSON.stringify({ mimeType: input.mimeType, size: buffer.length, classification: input.classification }),
+          metadata: JSON.stringify({ mimeType: input.mimeType, size: buffer.length, classification: input.classification, kind }),
         });
         return file;
+      }),
+      inspect: protectedProcedure.input(z.object({ id: z.string().min(1).max(64) })).mutation(async ({ ctx, input }) => {
+        const workspaceFile = await getWorkspaceFile(ctx.user.id, input.id);
+        if (!workspaceFile) throw new Error("الملف غير موجود أو لا تملك صلاحية الوصول إليه.");
+        if (workspaceFile.permissionState !== "allowed" || workspaceFile.approvalState === "rejected") throw new Error("لا تسمح حالة الملف الحالية بتحليل محتواه.");
+        if (workspaceFile.size > workspaceUploadLimits.maxFileBytes) throw new Error("يتجاوز الملف حد التحليل الآمن في الاستوديو.");
+        const signedUrl = await storageGetSignedUrl(workspaceFile.storageKey);
+        const response = await fetch(signedUrl);
+        if (!response.ok) throw new Error("تعذر قراءة الملف الخاص لتحليله.");
+        const buffer = Buffer.from(await response.arrayBuffer());
+        const inspection = await inspectWorkspaceBuffer(workspaceFile.name, workspaceFile.mimeType, buffer);
+        await createAuditEntry(ctx.user.id, {
+          eventType: "file.inspected",
+          requestId: workspaceFile.id,
+          outcome: "completed",
+          summary: `أُنشئت معاينة آمنة للملف «${workspaceFile.name}».`,
+          ruleIds: "",
+          metadata: JSON.stringify({ kind: inspection.kind, size: buffer.length, archiveFileCount: inspection.archiveFiles?.length ?? 0, previewTruncated: inspection.truncated ?? false }),
+        });
+        return inspection;
       }),
       updateClassification: protectedProcedure.input(z.object({ id: z.string().min(1), classification: z.enum(["private", "restricted", "shared"]) })).mutation(async ({ ctx, input }) => {
         const security = input.classification === "private"
