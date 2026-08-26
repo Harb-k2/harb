@@ -89,7 +89,7 @@ import { indexKnowledgeStorageObject } from "./knowledgeIndex";
 import { storageGetSignedUrl, storagePut } from "./storage";
 import { artifactMimeTypes, createDocumentArtifact, createProjectArchive, createProjectPreview, extractProjectArchiveFile, safeArtifactSlug, type ArtifactFormat } from "./technicalArtifacts";
 import { buildSearchRequests, extractSearchSources, isTrustedSourceUrl, needsTrustedSources, type SearchSource, type WebSearchMode } from "./webSearch";
-import { inspectWorkspaceBuffer, validateWorkspaceUpload, workspaceUploadLimits } from "./workspaceInspector";
+import { inspectWorkspaceBuffer, searchWorkspaceArchive, validateWorkspaceUpload, workspaceUploadLimits } from "./workspaceInspector";
 
 const scopeSchema = z.enum(["all", "general", "command", "file_change", "data_share"]);
 const actionSchema = z.enum(["allow", "approval", "deny"]);
@@ -1167,6 +1167,26 @@ export const appRouter = router({
           metadata: JSON.stringify({ kind: inspection.kind, size: buffer.length, archiveFileCount: inspection.archiveFiles?.length ?? 0, previewTruncated: inspection.truncated ?? false }),
         });
         return inspection;
+      }),
+      searchArchive: protectedProcedure.input(z.object({ id: z.string().min(1).max(64), query: z.string().trim().min(2).max(120) })).mutation(async ({ ctx, input }) => {
+        const workspaceFile = await getWorkspaceFile(ctx.user.id, input.id);
+        if (!workspaceFile) throw new Error("الملف غير موجود أو لا تملك صلاحية الوصول إليه.");
+        if (workspaceFile.permissionState !== "allowed" || workspaceFile.approvalState === "rejected") throw new Error("لا تسمح حالة الملف الحالية بالبحث داخل محتواه.");
+        if (workspaceFile.size > workspaceUploadLimits.maxFileBytes) throw new Error("تتجاوز الحزمة حد البحث الآمن في الاستوديو.");
+        const signedUrl = await storageGetSignedUrl(workspaceFile.storageKey);
+        const response = await fetch(signedUrl);
+        if (!response.ok) throw new Error("تعذر قراءة الحزمة الخاصة للبحث فيها.");
+        const buffer = Buffer.from(await response.arrayBuffer());
+        const results = await searchWorkspaceArchive(workspaceFile.name, workspaceFile.mimeType, buffer, input.query);
+        await createAuditEntry(ctx.user.id, {
+          eventType: "file.archive_searched",
+          requestId: workspaceFile.id,
+          outcome: "completed",
+          summary: `بُحث داخل حزمة ZIP خاصة «${workspaceFile.name}».`,
+          ruleIds: "",
+          metadata: JSON.stringify({ queryLength: input.query.length, resultCount: results.length }),
+        });
+        return { results };
       }),
       updateClassification: protectedProcedure.input(z.object({ id: z.string().min(1), classification: z.enum(["private", "restricted", "shared"]) })).mutation(async ({ ctx, input }) => {
         const security = input.classification === "private"

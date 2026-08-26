@@ -6,6 +6,8 @@ export const workspaceUploadLimits = {
   maxBatchFiles: 8,
   maxZipEntries: 40,
   maxPreviewBytes: 24_000,
+  maxArchiveSearchResults: 20,
+  maxArchiveSearchBytesPerFile: 64_000,
 } as const;
 
 const textExtensions = new Set(["txt", "md", "json", "yaml", "yml", "toml", "xml", "csv", "js", "jsx", "ts", "tsx", "mjs", "cjs", "py", "java", "go", "rs", "php", "c", "cc", "cpp", "h", "hpp", "cs", "html", "css", "scss", "sql", "sh", "bash", "zsh", "ps1", "rb", "kt", "swift", "vue", "svelte"]);
@@ -20,6 +22,8 @@ export type WorkspaceInspection = {
   truncated?: boolean;
   archiveFiles?: Array<{ path: string; size: number; text: boolean }>;
 };
+
+export type ArchiveSearchResult = { path: string; match: "name" | "content"; line?: number; snippet?: string };
 
 function extensionOf(name: string) {
   const last = name.trim().toLowerCase().split(".").pop();
@@ -67,4 +71,31 @@ export async function inspectWorkspaceBuffer(name: string, mimeType: string, buf
     .filter((file): file is { path: string; size: number } => Boolean(file.path))
     .map(file => ({ ...file, text: Boolean(getWorkspaceFileKind(file.path, "text/plain")) }));
   return { kind, summary: `حزمة ZIP خاصة تضم ${archiveFiles.length} ملفاً آمناً للعرض الوصفي.`, archiveFiles };
+}
+
+export async function searchWorkspaceArchive(name: string, mimeType: string, buffer: Buffer, query: string): Promise<ArchiveSearchResult[]> {
+  if (getWorkspaceFileKind(name, mimeType) !== "archive") throw new Error("البحث داخل المحتوى متاح لملفات ZIP فقط.");
+  if (buffer.length > workspaceUploadLimits.maxFileBytes) throw new Error("تتجاوز الحزمة حد البحث الآمن.");
+  const needle = query.trim().toLocaleLowerCase();
+  if (needle.length < 2 || needle.length > 120) throw new Error("اكتب عبارة بحث من حرفين إلى 120 حرفاً.");
+  const directory = await unzipper.Open.buffer(buffer);
+  if (directory.files.length > workspaceUploadLimits.maxZipEntries) throw new Error("تتجاوز حزمة ZIP حد البحث الآمن.");
+  const results: ArchiveSearchResult[] = [];
+  for (const entry of directory.files) {
+    if (results.length >= workspaceUploadLimits.maxArchiveSearchResults || entry.type !== "File") break;
+    const path = normalizeProjectFilePath(entry.path);
+    if (!path) continue;
+    if (path.toLocaleLowerCase().includes(needle)) results.push({ path, match: "name" });
+    if (results.length >= workspaceUploadLimits.maxArchiveSearchResults || !getWorkspaceFileKind(path, "text/plain") || entry.uncompressedSize > workspaceUploadLimits.maxArchiveSearchBytesPerFile) continue;
+    const entryBuffer = await entry.buffer();
+    if (entryBuffer.length > workspaceUploadLimits.maxArchiveSearchBytesPerFile || entryBuffer.includes(0)) continue;
+    const content = entryBuffer.toString("utf8");
+    const index = content.toLocaleLowerCase().indexOf(needle);
+    if (index < 0) continue;
+    const line = content.slice(0, index).split("\n").length;
+    const start = Math.max(0, index - 120);
+    const end = Math.min(content.length, index + needle.length + 180);
+    results.push({ path, match: "content", line, snippet: content.slice(start, end).replace(/\s+/g, " ").trim() });
+  }
+  return results.slice(0, workspaceUploadLimits.maxArchiveSearchResults);
 }

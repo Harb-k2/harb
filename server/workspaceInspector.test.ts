@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createProjectArchive } from "./technicalArtifacts";
-import { getWorkspaceFileKind, inspectWorkspaceBuffer, validateWorkspaceUpload, workspaceUploadLimits } from "./workspaceInspector";
+import { getWorkspaceFileKind, inspectWorkspaceBuffer, searchWorkspaceArchive, validateWorkspaceUpload, workspaceUploadLimits } from "./workspaceInspector";
 
 describe("workspace upload inspection", () => {
   it("accepts supported code and archive files while rejecting unsupported binary uploads", () => {
@@ -15,5 +15,12 @@ describe("workspace upload inspection", () => {
     expect(result.kind).toBe("archive");
     expect(result.archiveFiles?.map(file => file.path)).toContain("src/main.ts");
     expect(workspaceUploadLimits.maxBatchFiles).toBe(8);
+  });
+
+  it("searches only safe text inside an archive and returns a bounded contextual match", async () => {
+    const archive = await createProjectArchive([{ path: "src/auth.ts", content: "export function validateOwnerToken() { return true; }" }, { path: "README.md", content: "# Harb project" }]);
+    const results = await searchWorkspaceArchive("project.zip", "application/zip", archive, "owner");
+    expect(results).toEqual(expect.arrayContaining([expect.objectContaining({ path: "src/auth.ts", match: "content", line: 1, snippet: expect.stringContaining("validateOwnerToken") })]));
+    expect(results.length).toBeLessThanOrEqual(workspaceUploadLimits.maxArchiveSearchResults);
   });
 });
