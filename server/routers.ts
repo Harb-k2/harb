@@ -86,7 +86,7 @@ import { evaluateOwnerRules, toPolicyPrompt, type HarbRuleAction, type HarbScope
 import { evaluateCyberOperation, type CyberOperationType } from "./cyberPolicy";
 import { indexKnowledgeStorageObject } from "./knowledgeIndex";
 import { storageGetSignedUrl, storagePut } from "./storage";
-import { artifactMimeTypes, createDocumentArtifact, createProjectArchive, safeArtifactSlug, type ArtifactFormat } from "./technicalArtifacts";
+import { artifactMimeTypes, createDocumentArtifact, createProjectArchive, createProjectPreview, safeArtifactSlug, type ArtifactFormat } from "./technicalArtifacts";
 import { buildSearchRequests, extractSearchSources, type WebSearchMode } from "./webSearch";
 
 const scopeSchema = z.enum(["all", "general", "command", "file_change", "data_share"]);
@@ -372,12 +372,13 @@ export const appRouter = router({
         try {
           const result = await generateProjectSpec({ ownerId: ctx.user.id, request: input.request, responseMode: input.responseMode, rules: preflight.rules });
           const archive = await createProjectArchive(result.project.files);
+          const preview = createProjectPreview(result.project.files);
           const title = safeArtifactSlug(result.project.summary.slice(0, 70), "harb-project");
           const { key, url } = await storagePut(`owners/${ctx.user.id}/technical-projects/${title}.zip`, archive, artifactMimeTypes.zip);
           const file = await createWorkspaceFile(ctx.user.id, { name: `${title}.zip`, mimeType: artifactMimeTypes.zip, size: archive.length, storageKey: key, storageUrl: url, classification: "private", permissionState: "allowed", approvalState: "not_required", lastApprovalAt: null });
           await updateTask(ctx.user.id, preflight.task.id, { status: "completed", response: result.project.summary, completedAt: new Date() });
-          await createAuditEntry(ctx.user.id, { eventType: "studio.project_created", requestId: preflight.task.id, outcome: "completed", summary: "أُنشئت حزمة مشروع تقنية خاصة ضمن قانون المالك.", ruleIds: preflight.ruleIds, metadata: JSON.stringify({ workspaceFileId: file.id, fileCount: result.project.files.length, model: result.modelId ?? "default", modelSource: result.modelSource, usedFallback: result.usedFallback }) });
-          return { status: "completed" as const, summary: result.project.summary, fileCount: result.project.files.length, artifact: file };
+          await createAuditEntry(ctx.user.id, { eventType: "studio.project_created", requestId: preflight.task.id, outcome: "completed", summary: "أُنشئت حزمة مشروع تقنية خاصة ضمن قانون المالك.", ruleIds: preflight.ruleIds, metadata: JSON.stringify({ workspaceFileId: file.id, fileCount: result.project.files.length, previewFileCount: preview.length, model: result.modelId ?? "default", modelSource: result.modelSource, usedFallback: result.usedFallback }) });
+          return { status: "completed" as const, summary: result.project.summary, fileCount: result.project.files.length, preview, artifact: file };
         } catch (error) {
           await updateTask(ctx.user.id, preflight.task.id, { status: "failed", response: "تعذر إنشاء حزمة المشروع.", completedAt: new Date() });
           await createAuditEntry(ctx.user.id, { eventType: "studio.project_created", requestId: preflight.task.id, outcome: "failed", summary: "تعذر إنشاء حزمة مشروع Harb.", ruleIds: preflight.ruleIds, metadata: JSON.stringify({ error: error instanceof Error ? error.message : "unknown" }) });

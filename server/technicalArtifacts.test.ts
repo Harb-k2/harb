@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createDocumentArtifact, createProjectArchive, normalizeProjectFilePath, normalizeProjectFiles, safeArtifactSlug } from "./technicalArtifacts";
+import { createDocumentArtifact, createProjectArchive, createProjectPreview, normalizeProjectFilePath, normalizeProjectFiles, safeArtifactSlug } from "./technicalArtifacts";
 import { buildSearchRequests, extractSearchSources } from "./webSearch";
 
 describe("technical artifact safety", () => {
@@ -12,6 +12,12 @@ describe("technical artifact safety", () => {
   it("deduplicates project files and supplies a README", () => {
     const files = normalizeProjectFiles([{ path: "src/app.ts", content: "first" }, { path: "src/app.ts", content: "second" }, { path: "../bad", content: "x" }]);
     expect(files).toEqual(expect.arrayContaining([{ path: "src/app.ts", content: "first" }, expect.objectContaining({ path: "README.md" })]));
+  });
+
+  it("limits preview content while preserving safe file names and line totals", () => {
+    const preview = createProjectPreview([{ path: "src/app.ts", content: "one\ntwo\nthree" }, { path: ".env", content: "secret" }], 7);
+    expect(preview).toEqual(expect.arrayContaining([expect.objectContaining({ path: "src/app.ts", content: "one\ntwo", truncated: true, lineCount: 3 })]));
+    expect(preview.some(file => file.path === ".env")).toBe(false);
   });
 
   it("creates safe artifact names without replacing Arabic characters", () => {
