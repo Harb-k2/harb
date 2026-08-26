@@ -1,8 +1,6 @@
 import { useAuth } from "@/_core/hooks/useAuth";
-import { AIChatBox, type Message } from "@/components/AIChatBox";
-import { CyberOperationsPanel } from "@/components/CyberOperationsPanel";
-import { ModelLabPanel } from "@/components/ModelLabPanel";
-import { KnowledgeControlPanel } from "@/components/KnowledgeControlPanel";
+import { AIChatBox, type AttachmentUploadProgress, type ChatAttachment, type Message } from "@/components/AIChatBox";
+import { HarbAssistantWorkspace, type ResponseMode } from "@/components/HarbAssistantWorkspace";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -11,6 +9,8 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { startLogin } from "@/const";
 import { trpc } from "@/lib/trpc";
+import { shouldLoadControlAudit } from "@/lib/queryPerformance";
+import { brandImageLoadingProps } from "@/lib/mediaPerformance";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
@@ -23,7 +23,6 @@ import {
   FileText,
   FolderOpen,
   Gavel,
-  HardDriveUpload,
   KeyRound,
   Laptop,
   Loader2,
@@ -34,11 +33,13 @@ import {
   Plus,
   ScanLine,
   Search,
+  Settings,
   ShieldAlert,
   ShieldCheck,
   TerminalSquare,
+  WandSparkles,
 } from "lucide-react";
-import { useRef, useState } from "react";
+import { lazy, Suspense, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
 type RuleScope = "all" | "general" | "command" | "file_change" | "data_share";
 type RuleAction = "allow" | "approval" | "deny";
@@ -91,6 +92,18 @@ const taskStatus = {
   failed: { label: "تعذّر", className: "text-rose-200 bg-rose-400/10 border-rose-300/15" },
 };
 
+const CyberOperationsPanel = lazy(() => import("@/components/CyberOperationsPanel").then(module => ({ default: module.CyberOperationsPanel })));
+const ModelLabPanel = lazy(() => import("@/components/ModelLabPanel").then(module => ({ default: module.ModelLabPanel })));
+const BenchmarkPanel = lazy(() => import("@/components/BenchmarkPanel").then(module => ({ default: module.BenchmarkPanel })));
+const KnowledgeControlPanel = lazy(() => import("@/components/KnowledgeControlPanel").then(module => ({ default: module.KnowledgeControlPanel })));
+const TechnicalStudioPanel = lazy(() => import("@/components/TechnicalStudioPanel").then(module => ({ default: module.TechnicalStudioPanel })));
+const WorkspaceBatchUpload = lazy(() => import("@/components/WorkspaceBatchUpload").then(module => ({ default: module.WorkspaceBatchUpload })));
+const QualityInsightsPanel = lazy(() => import("@/components/QualityInsightsPanel").then(module => ({ default: module.QualityInsightsPanel })));
+
+function ControlPanelFallback() {
+  return <div className="mt-7 flex min-h-28 items-center justify-center gap-2 rounded-2xl border border-white/10 bg-black/10 p-5 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin text-primary" />يجري تجهيز لوحة التحكم…</div>;
+}
+
 function formatDate(value: Date | string | null) {
   if (!value) return "—";
   return new Intl.DateTimeFormat("ar", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
@@ -100,6 +113,29 @@ function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} بايت`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} كيلوبايت`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} ميغابايت`;
+}
+
+function fileToBase64(file: File, signal?: AbortSignal) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    const abort = () => reader.abort();
+    if (signal?.aborted) return reject(new DOMException("تم إلغاء رفع المرفق.", "AbortError"));
+    signal?.addEventListener("abort", abort, { once: true });
+    const cleanUp = () => signal?.removeEventListener("abort", abort);
+    reader.onerror = () => reject(new Error("تعذر قراءة الملف."));
+    reader.onabort = () => { cleanUp(); reject(new DOMException("تم إلغاء رفع المرفق.", "AbortError")); };
+    reader.onload = () => {
+      cleanUp();
+      const base64 = String(reader.result).split(",")[1];
+      if (base64) resolve(base64);
+      else reject(new Error("تعذر تحويل الملف."));
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function revokeAttachmentPreview(attachment: ChatAttachment) {
+  if (attachment.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(attachment.previewUrl);
 }
 
 function classificationLabel(value: "private" | "restricted" | "shared") {
@@ -201,21 +237,69 @@ export default function Home() {
   const { user, loading, isAuthenticated, logout } = useAuth();
   const utils = trpc.useUtils();
   const [messages, setMessages] = useState<Message[]>([]);
+  const [workspace, setWorkspace] = useState<"assistant" | "control">(() => window.location.hash ? "control" : "assistant");
+  const [responseMode, setResponseMode] = useState<ResponseMode>("balanced");
+  const [activeConversationId, setActiveConversationId] = useState<string | undefined>();
+  const [pendingAttachments, setPendingAttachments] = useState<ChatAttachment[]>([]);
+  const [isUploadingChatAttachments, setIsUploadingChatAttachments] = useState(false);
+  const [attachmentProgress, setAttachmentProgress] = useState<AttachmentUploadProgress | null>(null);
+  const [isAnalyzingAttachments, setIsAnalyzingAttachments] = useState(false);
   const [auditSearch, setAuditSearch] = useState("");
+  const deferredAuditSearch = useDeferredValue(auditSearch);
   const [pairingCode, setPairingCode] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const dashboard = trpc.harb.dashboard.useQuery(undefined, { enabled: isAuthenticated });
-  const audit = trpc.harb.audit.list.useQuery({ search: auditSearch }, { enabled: isAuthenticated });
+  const attachmentUploadAbortRef = useRef<AbortController | null>(null);
+  const attachmentProgressTimerRef = useRef<number | null>(null);
+  const dashboard = trpc.harb.dashboard.useQuery(undefined, { enabled: isAuthenticated, staleTime: 20_000, refetchOnWindowFocus: false });
+  const audit = trpc.harb.audit.list.useQuery({ search: deferredAuditSearch }, { enabled: shouldLoadControlAudit(isAuthenticated, workspace), staleTime: 15_000, refetchOnWindowFocus: false });
+  const conversations = trpc.harb.conversations.list.useQuery(undefined, { enabled: isAuthenticated, staleTime: 20_000, refetchOnWindowFocus: false });
+  const conversationInput = useMemo(() => ({ conversationId: activeConversationId ?? "unselected" }), [activeConversationId]);
+  const activeConversation = trpc.harb.conversations.get.useQuery(conversationInput, { enabled: isAuthenticated && Boolean(activeConversationId) });
   const refresh = () => { void utils.harb.dashboard.invalidate(); void utils.harb.audit.list.invalidate(); };
 
+  useEffect(() => {
+    if (!activeConversation.data) return;
+    const attachmentsByMessage = new Map<string, ChatAttachment[]>();
+    activeConversation.data.attachments.forEach(attachment => {
+      if (!attachment.messageId) return;
+      const items = attachmentsByMessage.get(attachment.messageId) ?? [];
+      items.push(attachment);
+      attachmentsByMessage.set(attachment.messageId, items);
+    });
+    setMessages(activeConversation.data.messages.map(message => ({ id: message.id, role: message.role, content: message.content, attachments: attachmentsByMessage.get(message.id) })));
+  }, [activeConversation.data]);
+
+  useEffect(() => {
+    if (workspace !== "control" || !window.location.hash) return;
+    const timer = window.setTimeout(() => document.getElementById(window.location.hash.slice(1))?.scrollIntoView({ block: "start" }), 80);
+    return () => window.clearTimeout(timer);
+  }, [workspace]);
+
   const submitTask = trpc.harb.tasks.submit.useMutation({
-    onSuccess: result => { setMessages(current => [...current, { role: "assistant", content: result.message }]); refresh(); },
-    onError: error => setMessages(current => [...current, { role: "assistant", content: `**تعذر إكمال الطلب.**\n\n${error.message}` }]),
+    onSuccess: result => {
+      setActiveConversationId(result.conversationId);
+      setMessages(current => [...current.filter(message => Boolean(message.id)), { id: result.userMessage.id, role: "user", content: result.userMessage.content, attachments: result.attachments }, { id: result.assistantMessage.id, role: "assistant", content: result.message }]);
+      setPendingAttachments(current => { current.forEach(revokeAttachmentPreview); return []; });
+      setIsAnalyzingAttachments(false);
+      void utils.harb.conversations.list.invalidate();
+      void utils.harb.conversations.get.invalidate();
+      refresh();
+    },
+    onError: error => { setIsAnalyzingAttachments(false); setMessages(current => [...current, { role: "assistant", content: `**تعذر إكمال الطلب.**\n\n${error.message}` }]); },
   });
+  const createConversation = trpc.harb.conversations.create.useMutation({
+    onSuccess: conversation => { setActiveConversationId(conversation.id); setMessages([]); setPendingAttachments(current => { current.forEach(revokeAttachmentPreview); return []; }); setAttachmentProgress(null); void utils.harb.conversations.list.invalidate(); },
+    onError: error => toast.error(error.message),
+  });
+  const rateMessage = trpc.harb.conversations.feedback.useMutation({
+    onSuccess: () => { toast.success("تم تسجيل تقييمك لتحسين مراجعة الردود."); void utils.harb.conversations.get.invalidate(); },
+    onError: error => toast.error(error.message),
+  });
+  const uploadConversationAttachment = trpc.harb.conversations.attachments.upload.useMutation({ onError: error => toast.error(error.message) });
+  const summarizePdfAttachment = trpc.harb.conversations.attachments.summarizePdf.useMutation();
+  const ocrAttachment = trpc.harb.conversations.attachments.ocrAndSummarize.useMutation();
   const createRule = trpc.harb.rules.create.useMutation({ onSuccess: () => { toast.success("تمت إضافة القاعدة."); refresh(); }, onError: error => toast.error(error.message) });
   const updateRule = trpc.harb.rules.update.useMutation({ onSuccess: () => { toast.success("تم تحديث القانون."); refresh(); }, onError: error => toast.error(error.message) });
   const resolveApproval = trpc.harb.approvals.resolve.useMutation({ onSuccess: () => { toast.success("تم تسجيل القرار في سجل التدقيق."); refresh(); }, onError: error => toast.error(error.message) });
-  const uploadFile = trpc.harb.files.upload.useMutation({ onSuccess: () => { toast.success("تم حفظ الملف في مساحة العمل الخاصة."); refresh(); }, onError: error => toast.error(error.message) });
   const updateFileClassification = trpc.harb.files.updateClassification.useMutation({ onSuccess: () => { toast.success("تم تحديث تصنيف الملف وتسجيل القرار."); refresh(); }, onError: error => toast.error(error.message) });
   const requestFileApproval = trpc.harb.files.requestApproval.useMutation({ onSuccess: () => { toast.success("أُضيف طلب الموافقة إلى سجل الملف."); refresh(); }, onError: error => toast.error(error.message) });
   const resolveFileApproval = trpc.harb.files.resolveApproval.useMutation({ onSuccess: () => { toast.success("تم تسجيل قرار الملف."); refresh(); }, onError: error => toast.error(error.message) });
@@ -223,19 +307,89 @@ export default function Home() {
   const updateAgentScopes = trpc.harb.desktop.updateScopes.useMutation({ onSuccess: () => { toast.success("تم تحديث نطاقات الجهاز المتصل."); refresh(); }, onError: error => toast.error(error.message) });
 
   const handleSend = (request: string) => {
-    setMessages(current => [...current, { role: "user", content: request }]);
-    submitTask.mutate({ request });
+    const conversation = messages
+      .filter(message => message.role === "user" || message.role === "assistant")
+      .slice(-8)
+      .map(message => ({ role: message.role as "user" | "assistant", content: message.content }));
+    setMessages(current => [...current, { role: "user", content: request, attachments: pendingAttachments }]);
+    setIsAnalyzingAttachments(pendingAttachments.length > 0);
+    submitTask.mutate({ request, responseMode, conversationId: activeConversationId, attachmentIds: pendingAttachments.map(attachment => attachment.id), conversation });
   };
-  const handleUpload = (file?: File) => {
-    if (!file) return;
-    if (file.size > 10_000_000) return toast.error("يدعم الإصدار الأول ملفات حتى 10 ميغابايت.");
-    const reader = new FileReader();
-    reader.onload = () => {
-      const base64 = String(reader.result).split(",")[1];
-      if (!base64) return toast.error("تعذر قراءة الملف.");
-      uploadFile.mutate({ name: file.name, mimeType: file.type || "application/octet-stream", base64, classification: "private" });
-    };
-    reader.readAsDataURL(file);
+  const handleChatAttachments = async (files: File[]) => {
+    const allowedMimeTypes = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
+    const remaining = 3 - pendingAttachments.length;
+    if (!remaining) return toast.error("يمكن إرفاق ثلاثة عناصر كحد أقصى مع الرسالة الواحدة.");
+    const selected = files.slice(0, remaining);
+    if (files.length > selected.length) toast.error("احتُفظ بأول ثلاثة مرفقات فقط.");
+    if (selected.some(file => !allowedMimeTypes.has(file.type))) return toast.error("يدعم صندوق المحادثة صور JPEG وPNG وWebP وملفات PDF فقط.");
+    if (selected.some(file => file.size > 8 * 1024 * 1024)) return toast.error("الحد الأقصى للمرفق الواحد هو 8 ميغابايت.");
+    if (attachmentProgressTimerRef.current) window.clearTimeout(attachmentProgressTimerRef.current);
+    const controller = new AbortController();
+    attachmentUploadAbortRef.current = controller;
+    setIsUploadingChatAttachments(true);
+    try {
+      let conversationId = activeConversationId;
+      if (!conversationId) {
+        const conversation = await createConversation.mutateAsync({ title: "محادثة جديدة" });
+        conversationId = conversation.id;
+      }
+      for (let index = 0; index < selected.length; index += 1) {
+        const file = selected[index];
+        setAttachmentProgress({ stage: "preparing", current: index + 1, total: selected.length, fileName: file.name });
+        const base64 = await fileToBase64(file, controller.signal);
+        if (controller.signal.aborted) throw new DOMException("تم إلغاء رفع المرفق.", "AbortError");
+        setAttachmentProgress({ stage: "uploading", current: index + 1, total: selected.length, fileName: file.name });
+        const attachment = await uploadConversationAttachment.mutateAsync({ conversationId, name: file.name, mimeType: file.type, base64 });
+        if (controller.signal.aborted) throw new DOMException("تم إلغاء رفع المرفق.", "AbortError");
+        const previewUrl = file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined;
+        setPendingAttachments(current => [...current, { ...attachment, previewUrl }]);
+        const runOcr = async () => {
+          setAttachmentProgress({ stage: "ocr", current: index + 1, total: selected.length, fileName: file.name });
+          const ocr = await ocrAttachment.mutateAsync({ conversationId, attachmentId: attachment.id });
+          if (controller.signal.aborted) throw new DOMException("تم إلغاء رفع المرفق.", "AbortError");
+          setMessages(current => [...current, { id: ocr.assistantMessage.id, role: "assistant", content: ocr.message }]);
+          void utils.harb.conversations.get.invalidate();
+        };
+        if (attachment.mimeType === "application/pdf") {
+          setAttachmentProgress({ stage: "extracting", current: index + 1, total: selected.length, fileName: file.name });
+          try {
+            const summary = await summarizePdfAttachment.mutateAsync({ conversationId, attachmentId: attachment.id });
+            if (controller.signal.aborted) throw new DOMException("تم إلغاء رفع المرفق.", "AbortError");
+            setMessages(current => [...current, { id: summary.assistantMessage.id, role: "assistant", content: summary.message }]);
+            void utils.harb.conversations.get.invalidate();
+            if (summary.status === "no_text") await runOcr();
+          } catch (summaryError) {
+            if (summaryError instanceof DOMException && summaryError.name === "AbortError") throw summaryError;
+            toast.error(summaryError instanceof Error ? summaryError.message : "تعذر إنشاء ملخص PDF السريع.");
+          }
+        } else if (attachment.kind === "image") {
+          try {
+            await runOcr();
+          } catch (ocrError) {
+            if (ocrError instanceof DOMException && ocrError.name === "AbortError") throw ocrError;
+            toast.error(ocrError instanceof Error ? ocrError.message : "تعذر استخراج النص من الصورة.");
+          }
+        }
+        setAttachmentProgress({ stage: "ready", current: index + 1, total: selected.length, fileName: file.name });
+      }
+      void utils.harb.conversations.get.invalidate();
+      void utils.harb.conversations.list.invalidate();
+      attachmentProgressTimerRef.current = window.setTimeout(() => setAttachmentProgress(null), 900);
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === "AbortError")) toast.error(error instanceof Error ? error.message : "تعذر رفع المرفق.");
+      setAttachmentProgress(null);
+    } finally {
+      if (attachmentUploadAbortRef.current === controller) attachmentUploadAbortRef.current = null;
+      setIsUploadingChatAttachments(false);
+    }
+  };
+  const cancelChatAttachmentUpload = () => {
+    attachmentUploadAbortRef.current?.abort();
+    attachmentUploadAbortRef.current = null;
+    if (attachmentProgressTimerRef.current) window.clearTimeout(attachmentProgressTimerRef.current);
+    setAttachmentProgress(null);
+    setIsUploadingChatAttachments(false);
+    toast.info("تم إلغاء رفع المرفق. لن يُربط أي مرفق ملغى برسالتك.");
   };
 
   if (loading) return <div className="harb-shell flex min-h-screen items-center justify-center"><Loader2 className="h-7 w-7 animate-spin text-primary" /></div>;
@@ -260,29 +414,80 @@ export default function Home() {
   const auditEntries = audit.data ?? data?.audit ?? [];
   const activeRules = rules.filter(rule => rule.isActive).length;
   const pendingApprovals = approvals.filter(item => item.status === "requested").length;
+  const feedbackByMessage = Object.fromEntries((activeConversation.data?.feedback ?? []).map(item => [item.messageId, item.rating])) as Record<string, "up" | "down">;
+  const openControlSection = (sectionId: string) => {
+    window.location.hash = sectionId;
+    setWorkspace("control");
+    window.setTimeout(() => document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
+  };
+
+  if (workspace === "assistant") {
+    return <HarbAssistantWorkspace
+      userName={user.name || "المالك"}
+      messages={messages}
+      isLoading={submitTask.isPending}
+      responseMode={responseMode}
+      activeRules={activeRules}
+      pendingApprovals={pendingApprovals}
+      taskCount={tasks.length}
+      onSendMessage={handleSend}
+      onResponseModeChange={setResponseMode}
+      onNewConversation={() => createConversation.mutate({ title: "محادثة جديدة" })}
+      onOpenControlCenter={() => setWorkspace("control")}
+      onOpenTechnicalStudio={() => openControlSection("studio")}
+      onOpenWebSearch={() => openControlSection("studio")}
+      onOpenProjects={() => openControlSection("studio")}
+      onOpenSettings={() => openControlSection("settings")}
+      onLogout={logout}
+      conversations={conversations.data ?? []}
+      projects={files.filter(file => file.mimeType === "application/zip").map(file => ({ id: file.id, name: file.name, createdAt: file.createdAt }))}
+      activeConversationId={activeConversationId}
+      feedbackByMessage={feedbackByMessage}
+      onSelectConversation={conversationId => { setActiveConversationId(conversationId); setMessages([]); setPendingAttachments(current => { current.forEach(revokeAttachmentPreview); return []; }); }}
+      onRateMessage={(messageId, rating) => {
+        if (!activeConversationId) return;
+        rateMessage.mutate({ messageId, conversationId: activeConversationId, rating });
+      }}
+      pendingAttachments={pendingAttachments}
+      isUploadingAttachments={isUploadingChatAttachments}
+      attachmentProgress={attachmentProgress}
+      isAnalyzingAttachments={isAnalyzingAttachments}
+      onSelectFiles={files => { void handleChatAttachments(files); }}
+      onCancelUpload={cancelChatAttachmentUpload}
+      onRemoveAttachment={attachmentId => setPendingAttachments(current => { const attachment = current.find(item => item.id === attachmentId); if (attachment) revokeAttachmentPreview(attachment); return current.filter(item => item.id !== attachmentId); })}
+    />;
+  }
 
   return (
-    <div className="harb-shell min-h-screen" dir="rtl">
-      <div className="mx-auto grid min-h-screen max-w-[1600px] grid-cols-1 lg:grid-cols-[270px_minmax(0,1fr)]">
-        <aside className="border-b border-white/10 bg-[#101924]/70 p-5 backdrop-blur-xl lg:border-b-0 lg:border-l">
-          <div className="flex items-center gap-3 px-2"><div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-lg font-black text-primary-foreground">ح</div><div><p className="font-bold tracking-tight">Harb</p><p className="text-xs text-muted-foreground">مركز السيطرة</p></div></div>
+    <div className="harb-shell harb-control-shell min-h-screen" dir="rtl">
+      <div className="harb-control-layout mx-auto grid min-h-screen max-w-[1600px] grid-cols-1 lg:grid-cols-[270px_minmax(0,1fr)]">
+        <aside className="harb-control-sidebar border-b border-white/10 bg-[#101924]/70 p-5 backdrop-blur-xl lg:border-b-0 lg:border-l">
+          <div className="flex items-center gap-3 px-2"><img src="/manus-storage/harb-logo-mark_281c074b.png" alt="Harb" width="40" height="40" {...brandImageLoadingProps} className="h-10 w-10 rounded-xl object-cover shadow-[0_10px_24px_oklch(0.79_0.144_169_/_16%)]" /><div><p className="font-bold tracking-tight">Harb</p><p className="text-xs text-muted-foreground">مركز السيطرة</p></div></div>
           <nav className="mt-9 grid gap-1 text-sm">
-            {[{ href: "#overview", label: "نظرة عامة", icon: Activity }, { href: "#cyber", label: "العمليات السيبرانية", icon: ShieldCheck }, { href: "#lab", label: "مختبر النموذج", icon: Beaker }, { href: "#tasks", label: "محادثة المهام", icon: MessageSquare }, { href: "#files", label: "مساحة الملفات", icon: FolderOpen }, { href: "#rules", label: "قوانين المالك", icon: Gavel }, { href: "#audit", label: "سجل التدقيق", icon: ScanLine }, { href: "#desktop", label: "عميل سطح المكتب", icon: Laptop }].map(item => <a key={item.href} href={item.href} className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground"><item.icon className="h-4 w-4" />{item.label}</a>)}
+            {[{ href: "#overview", label: "نظرة عامة", icon: Activity }, { href: "#studio", label: "الاستوديو التقني", icon: WandSparkles }, { href: "#cyber", label: "العمليات السيبرانية", icon: ShieldCheck }, { href: "#lab", label: "مختبر النموذج", icon: Beaker }, { href: "#tasks", label: "محادثة المهام", icon: MessageSquare }, { href: "#files", label: "مساحة الملفات", icon: FolderOpen }, { href: "#rules", label: "قوانين المالك", icon: Gavel }, { href: "#audit", label: "سجل التدقيق", icon: ScanLine }, { href: "#desktop", label: "عميل سطح المكتب", icon: Laptop }, { href: "#settings", label: "الإعدادات", icon: Settings }].map(item => <a key={item.href} href={item.href} className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground"><item.icon className="h-4 w-4" />{item.label}</a>)}
           </nav>
           <div className="mt-9 rounded-2xl border border-primary/15 bg-primary/5 p-4"><div className="flex items-center gap-2 text-sm font-semibold text-primary"><ShieldCheck className="h-4 w-4" />حماية Harb مفعّلة</div><p className="mt-2 text-xs leading-5 text-muted-foreground">لا تُرسل العمليات الحساسة إلى الأجهزة المتصلة دون تقييم قانوني وموافقة عند اللزوم.</p></div>
           <div className="mt-6 flex items-center gap-3 border-t border-white/10 pt-5"><div className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-sm font-bold">{user.name?.slice(0, 1) || "م"}</div><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{user.name || "المالك"}</p><p className="truncate text-xs text-muted-foreground">مالك النظام</p></div><button onClick={logout} aria-label="تسجيل الخروج" className="rounded-lg p-2 text-muted-foreground hover:bg-white/5 hover:text-foreground"><LogOut className="h-4 w-4" /></button></div>
         </aside>
 
-        <main className="min-w-0 p-4 sm:p-7">
-          <header className="mb-7 flex flex-col gap-4 border-b border-white/10 pb-6 sm:flex-row sm:items-center sm:justify-between"><div><p className="section-kicker">Harb / Operations</p><h1 className="mt-1 text-2xl font-bold tracking-tight sm:text-3xl">أهلاً بك، {user.name || "المالك"}</h1><p className="mt-1 text-sm text-muted-foreground">قرارات قابلة للتفسير قبل التنفيذ، وسجل موثوق بعده.</p></div><div className="flex items-center gap-2 self-start rounded-full border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-primary"><span className="status-dot" />Harb Core متصل <span className="text-primary/60">•</span> وضع محمي</div></header>
+        <main className="harb-control-main min-w-0 p-4 sm:p-7">
+          <header className="harb-control-header mb-7 flex flex-col gap-4 border-b border-white/10 pb-6 sm:flex-row sm:items-center sm:justify-between"><div><p className="section-kicker">Harb / Operations</p><h1 className="mt-1 text-2xl font-bold tracking-tight sm:text-3xl">أهلاً بك، {user.name || "المالك"}</h1><p className="mt-1 text-sm text-muted-foreground">قرارات قابلة للتفسير قبل التنفيذ، وسجل موثوق بعده.</p></div><div className="flex flex-wrap items-center gap-2 self-start"><Button variant="outline" onClick={() => setWorkspace("assistant")} className="rounded-full border-white/15 bg-white/5 text-xs"><MessageSquare className="ml-1.5 h-4 w-4" />فتح المحادثة</Button><div className="flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-primary"><span className="status-dot" />Harb Core متصل <span className="text-primary/60">•</span> وضع محمي</div></div></header>
 
           <section id="overview" className="scroll-mt-6"><div className="mb-4 flex items-center justify-between"><div><p className="section-kicker">الحالة التشغيلية</p><h2 className="mt-1 text-xl font-bold">نظرة عامة</h2></div><Badge variant="outline" className="border-primary/20 bg-primary/5 text-primary">آخر مزامنة الآن</Badge></div><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><Metric label="قوانين فعالة" value={activeRules} hint="تُفحص حسب الأولوية" icon={Gavel} /><Metric label="مهام مسجلة" value={tasks.length} hint="تشمل القرارات والنتائج" icon={Activity} /><Metric label="موافقات معلقة" value={pendingApprovals} hint="لن تنفذ قبل القرار" icon={KeyRound} /><Metric label="ملفات خاصة" value={files.length} hint="محفوظة مع بياناتها الوصفية" icon={FolderOpen} /></div></section>
 
-          <CyberOperationsPanel />
+          <section id="settings" className="mt-7 scroll-mt-6"><div className="glass-panel rounded-2xl p-5"><div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><p className="section-kicker">Harb Settings</p><h2 className="mt-1 text-xl font-bold">إعدادات المشروع والجلسة</h2><p className="mt-1 text-sm text-muted-foreground">إعدادات تشغيل واضحة تحافظ على سرعة الاستجابة والحوكمة دون كشف مفاتيح أو بيانات حساسة.</p></div><Button variant="outline" onClick={() => setWorkspace("assistant")} className="w-fit border-white/15 bg-white/5"><MessageSquare className="ml-2 h-4 w-4" />فتح المحادثة</Button></div><div className="mt-5 grid gap-3 md:grid-cols-3"><article className="rounded-xl border border-white/10 bg-black/10 p-4"><p className="text-sm font-semibold">أداء الاستجابة</p><p className="mt-2 text-xs leading-5 text-muted-foreground">النمط المختصر يستخدم سقفاً أدنى للاستدلال والسياق؛ يبقى التحليل العميق متاحاً عند الحاجة.</p></article><article className="rounded-xl border border-white/10 bg-black/10 p-4"><p className="text-sm font-semibold">المصادر الموثوقة</p><p className="mt-2 text-xs leading-5 text-muted-foreground">يُطلب بحث خارجي فقط عند طلب المراجع أو المعلومات الحديثة، وتعرض المصادر الرسمية في الرد.</p></article><article className="rounded-xl border border-white/10 bg-black/10 p-4"><p className="text-sm font-semibold">حالة الجلسة</p><p className="mt-2 text-xs leading-5 text-muted-foreground">متصل باسم {user.name || "المالك"}. يمكنك إنهاء الجلسة من الشريط الجانبي أو هنا.</p><Button variant="ghost" size="sm" onClick={logout} className="mt-2 h-8 px-0 text-rose-200 hover:bg-transparent hover:text-rose-100"><LogOut className="ml-1.5 h-3.5 w-3.5" />تسجيل الخروج</Button></article></div></div></section>
 
-          <ModelLabPanel />
+          <Suspense fallback={<ControlPanelFallback />}><QualityInsightsPanel tasks={dashboard.data?.tasks ?? []} audit={dashboard.data?.audit ?? []} /></Suspense>
 
-          <KnowledgeControlPanel />
+          <Suspense fallback={<ControlPanelFallback />}><TechnicalStudioPanel /></Suspense>
+
+          <Suspense fallback={<ControlPanelFallback />}><CyberOperationsPanel /></Suspense>
+
+          <Suspense fallback={<ControlPanelFallback />}><ModelLabPanel /></Suspense>
+
+          <Suspense fallback={<ControlPanelFallback />}><BenchmarkPanel /></Suspense>
+
+          <Suspense fallback={<ControlPanelFallback />}><KnowledgeControlPanel /></Suspense>
 
           <section id="tasks" className="mt-7 grid scroll-mt-6 gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(300px,0.65fr)]">
             <div className="glass-panel overflow-hidden rounded-2xl"><div className="flex items-center justify-between border-b border-white/10 p-5"><div><p className="section-kicker">Task Console</p><h2 className="mt-1 text-lg font-bold">محادثة المهام</h2></div><Badge variant="outline" className="border-primary/20 text-primary"><Bot className="ml-1 h-3.5 w-3.5" />فحص قبل التنفيذ</Badge></div><div className="p-3"><AIChatBox messages={messages} onSendMessage={handleSend} isLoading={submitTask.isPending} height="430px" className="border-0 bg-transparent shadow-none" placeholder="صف المهمة التي تريد من Harb تحليلها أو تنظيمها…" emptyStateMessage="ابدأ بطلب واضح؛ سيعرض Harb القرار قبل أي عملية حساسة." suggestedPrompts={["لخّص الملفات الموجودة في مساحة العمل", "أنشئ خطة لمراجعة مشروع برمجي", "احذف الملف القديم من جهازي"]} /></div></div>
@@ -290,7 +495,7 @@ export default function Home() {
           </section>
 
           <section id="files" className="mt-7 grid scroll-mt-6 gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(310px,0.8fr)]">
-            <div className="glass-panel rounded-2xl p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="section-kicker">Workspace</p><h2 className="mt-1 text-lg font-bold">مساحة الملفات</h2></div><input ref={fileInputRef} type="file" className="hidden" onChange={event => handleUpload(event.target.files?.[0])} /><Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={uploadFile.isPending} className="rounded-xl border-white/15 bg-white/5"><HardDriveUpload className="ml-2 h-4 w-4" />{uploadFile.isPending ? "جارٍ الحفظ…" : "رفع ملف"}</Button></div><p className="mt-2 text-xs text-muted-foreground">تُخزّن الملفات خاصةً افتراضياً، ويمكن للمالك إعادة تصنيفها. لا يعني التصنيف المشترك إرسال الملف تلقائياً؛ تبقى المشاركة خاضعة للقوانين والموافقة.</p><div className="mt-5 space-y-2">{files.length ? files.map(file => <article key={file.id} className="flex flex-col gap-3 rounded-xl border border-white/8 bg-black/10 p-3 sm:flex-row sm:items-center"><a href={file.storageUrl} target="_blank" rel="noreferrer" className="flex min-w-0 flex-1 items-center gap-3 transition-colors hover:text-primary"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/5"><FileText className="h-4 w-4 text-primary" /></span><span className="min-w-0"><span className="block truncate text-sm font-medium">{file.name}</span><span className="mt-1 block text-xs text-muted-foreground">{file.mimeType} · {formatBytes(file.size)} · {formatDate(file.createdAt)}</span></span></a><div className="flex items-center gap-2 self-end sm:self-auto"><select aria-label={`تصنيف ${file.name}`} value={file.classification} onChange={event => updateFileClassification.mutate({ id: file.id, classification: event.target.value as "private" | "restricted" | "shared" })} className="h-8 rounded-md border border-white/15 bg-background px-2 text-xs"><option value="private">خاص</option><option value="restricted">مقيّد</option><option value="shared">مشترك</option></select><Badge variant="outline" className="border-white/10 text-[10px] text-muted-foreground">{classificationLabel(file.classification)}</Badge></div><p className="w-full text-[11px] text-muted-foreground sm:hidden">{file.classification === "private" ? "محمي داخل مساحة العمل" : file.classification === "restricted" ? "أي تعديل أو مشاركة يحتاج موافقة" : "لا يزال الإرسال الخارجي خاضعاً للقوانين"}</p></article>) : <div className="rounded-xl border border-dashed border-white/15 p-7 text-center"><FolderOpen className="mx-auto h-7 w-7 text-muted-foreground" /><p className="mt-3 text-sm font-medium">مساحة عمل فارغة</p><p className="mt-1 text-xs text-muted-foreground">ارفع ملفاً لربطه بمهام Harb وسجل التدقيق.</p></div>}</div></div>
+            <div className="glass-panel rounded-2xl p-5"><div><p className="section-kicker">Workspace</p><h2 className="mt-1 text-lg font-bold">مساحة الملفات والمشاريع</h2></div><p className="mt-2 text-xs text-muted-foreground">تُخزّن الملفات خاصةً افتراضياً، ويمكن للمالك إعادة تصنيفها. لا يعني التصنيف المشترك إرسال الملف تلقائياً؛ تبقى المشاركة خاضعة للقوانين والموافقة.</p><div className="mt-5"><Suspense fallback={<div className="rounded-xl border border-dashed border-white/15 p-4 text-center text-xs text-muted-foreground">يُجهّز رافع الملفات…</div>}><WorkspaceBatchUpload /></Suspense></div><div className="mt-5 space-y-2">{files.length ? files.map(file => <article key={file.id} className="flex flex-col gap-3 rounded-xl border border-white/8 bg-black/10 p-3 sm:flex-row sm:items-center"><a href={file.storageUrl} target="_blank" rel="noreferrer" className="flex min-w-0 flex-1 items-center gap-3 transition-colors hover:text-primary"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/5"><FileText className="h-4 w-4 text-primary" /></span><span className="min-w-0"><span className="block truncate text-sm font-medium">{file.name}</span><span className="mt-1 block text-xs text-muted-foreground">{file.mimeType} · {formatBytes(file.size)} · {formatDate(file.createdAt)}</span></span></a><div className="flex items-center gap-2 self-end sm:self-auto"><select aria-label={`تصنيف ${file.name}`} value={file.classification} onChange={event => updateFileClassification.mutate({ id: file.id, classification: event.target.value as "private" | "restricted" | "shared" })} className="h-8 rounded-md border border-white/15 bg-background px-2 text-xs"><option value="private">خاص</option><option value="restricted">مقيّد</option><option value="shared">مشترك</option></select><Badge variant="outline" className="border-white/10 text-[10px] text-muted-foreground">{classificationLabel(file.classification)}</Badge></div><p className="w-full text-[11px] text-muted-foreground sm:hidden">{file.classification === "private" ? "محمي داخل مساحة العمل" : file.classification === "restricted" ? "أي تعديل أو مشاركة يحتاج موافقة" : "لا يزال الإرسال الخارجي خاضعاً للقوانين"}</p></article>) : <div className="rounded-xl border border-dashed border-white/15 p-7 text-center"><FolderOpen className="mx-auto h-7 w-7 text-muted-foreground" /><p className="mt-3 text-sm font-medium">مساحة عمل فارغة</p><p className="mt-1 text-xs text-muted-foreground">ارفع دفعة ملفات لربطها بمهام Harb وسجل التدقيق.</p></div>}</div></div>
             <div className="glass-panel rounded-2xl p-5"><div className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-300/10 text-amber-200"><LockKeyhole className="h-5 w-5" /></span><div><p className="section-kicker text-amber-200">Consent Queue</p><h2 className="mt-1 text-lg font-bold">موافقات صريحة</h2></div></div><div className="mt-5 space-y-3">{approvals.filter(item => item.status === "requested").length ? approvals.filter(item => item.status === "requested").map(item => <article key={item.id} className="rounded-xl border border-amber-200/15 bg-amber-300/5 p-3"><p className="text-sm font-medium leading-6">{item.summary}</p><p className="mt-2 text-xs text-muted-foreground">نوع العملية: {scopeLabels[item.action as RuleScope] || item.action} · تنتهي {formatDate(item.expiresAt)}</p><div className="mt-3 flex gap-2"><Button size="sm" onClick={() => resolveApproval.mutate({ id: item.id, status: "approved" })} className="h-8 bg-primary text-primary-foreground"><CheckCircle2 className="ml-1 h-3.5 w-3.5" />موافقة</Button><Button size="sm" variant="outline" onClick={() => resolveApproval.mutate({ id: item.id, status: "rejected" })} className="h-8 border-rose-200/20 text-rose-200 hover:bg-rose-400/10">رفض</Button></div></article>) : <div className="rounded-xl border border-dashed border-white/15 p-5 text-center"><ShieldCheck className="mx-auto h-6 w-6 text-primary" /><p className="mt-2 text-sm font-medium">لا توجد موافقات معلقة</p><p className="mt-1 text-xs text-muted-foreground">تظهر هنا العمليات الحساسة فقط.</p></div>}</div></div>
           </section>
 

@@ -1,3 +1,4 @@
+@import "tailwindcss";
 @import "tw-animate-css";
 
 @custom-variant dark (&:is(.dark *));
@@ -29,46 +30,65 @@
 }
 
 :root, .dark {
-  --radius: 1rem;
-  --background: oklch(0.115 0.016 250);
-  --foreground: oklch(0.94 0.012 250);
-  --card: oklch(0.16 0.018 250 / 86%);
-  --card-foreground: oklch(0.94 0.012 250);
-  --popover: oklch(0.18 0.018 250);
-  --popover-foreground: oklch(0.94 0.012 250);
-  --primary: oklch(0.79 0.144 169);
-  --primary-foreground: oklch(0.13 0.02 250);
-  --secondary: oklch(0.22 0.021 250);
-  --secondary-foreground: oklch(0.83 0.012 250);
-  --muted: oklch(0.205 0.018 250);
-  --muted-foreground: oklch(0.69 0.018 250);
-  --accent: oklch(0.24 0.026 250);
-  --accent-foreground: oklch(0.94 0.012 250);
+  --radius: 1.1rem;
+  --background: oklch(0.105 0.018 246);
+  --foreground: oklch(0.95 0.01 240);
+  --card: oklch(0.155 0.02 246 / 88%);
+  --card-foreground: oklch(0.95 0.01 240);
+  --popover: oklch(0.18 0.02 246);
+  --popover-foreground: oklch(0.95 0.01 240);
+  --primary: oklch(0.8 0.135 173);
+  --primary-foreground: oklch(0.13 0.02 246);
+  --secondary: oklch(0.215 0.023 246);
+  --secondary-foreground: oklch(0.86 0.012 246);
+  --muted: oklch(0.19 0.019 246);
+  --muted-foreground: oklch(0.7 0.018 246);
+  --accent: oklch(0.235 0.028 246);
+  --accent-foreground: oklch(0.95 0.01 240);
   --destructive: oklch(0.66 0.19 25);
   --destructive-foreground: oklch(0.98 0 0);
-  --border: oklch(0.82 0.025 250 / 14%);
-  --input: oklch(0.82 0.025 250 / 16%);
-  --ring: oklch(0.79 0.144 169);
+  --border: oklch(0.82 0.025 246 / 15%);
+  --input: oklch(0.82 0.025 246 / 17%);
+  --ring: oklch(0.8 0.135 173);
 }
 
 @layer base {
   * { @apply border-border outline-ring/50; }
   html { scroll-behavior: smooth; }
-  body { @apply bg-background text-foreground; font-family: "IBM Plex Sans Arabic", sans-serif; }
+  html, body, #root { width: 100%; min-height: 100%; }
+  html { color-scheme: dark; }
+  body { @apply bg-background text-foreground; margin: 0; font-family: "IBM Plex Sans Arabic", "Noto Sans Arabic", sans-serif; }
+  input:not([type="checkbox"]):not([type="radio"]), textarea, select { color: var(--foreground); background-color: oklch(0.145 0.018 246 / 92%); border-color: oklch(0.82 0.025 246 / 18%); }
+  input:not([type="checkbox"]):not([type="radio"])::placeholder, textarea::placeholder { color: oklch(0.62 0.02 246); }
   button:not(:disabled), [role="button"]:not([aria-disabled="true"]), [type="button"]:not(:disabled), [type="submit"]:not(:disabled), a[href] { @apply cursor-pointer; }
 }
 
 @layer components {
   .harb-shell {
+    position: relative;
+    isolation: isolate;
+    width: 100%;
+    overflow-x: clip;
     background:
-      radial-gradient(circle at 18% 6%, oklch(0.39 0.11 188 / 18%), transparent 28rem),
-      radial-gradient(circle at 84% 34%, oklch(0.48 0.12 250 / 13%), transparent 34rem),
-      linear-gradient(135deg, oklch(0.11 0.016 250), oklch(0.135 0.02 247));
+      radial-gradient(circle at 18% 6%, oklch(0.42 0.12 188 / 20%), transparent 30rem),
+      radial-gradient(circle at 84% 34%, oklch(0.31 0.08 250 / 18%), transparent 36rem),
+      linear-gradient(135deg, oklch(0.09 0.017 246), oklch(0.13 0.02 246));
+  }
+  .harb-shell::before {
+    position: absolute;
+    z-index: -1;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.32;
+    content: "";
+    background-image: linear-gradient(oklch(0.8 0.03 190 / 4%) 1px, transparent 1px), linear-gradient(90deg, oklch(0.8 0.03 190 / 4%) 1px, transparent 1px);
+    background-size: 52px 52px;
+    mask-image: linear-gradient(to bottom, black, transparent 78%);
   }
   .glass-panel {
     border: 1px solid oklch(1 0 0 / 10%);
-    background: oklch(0.16 0.018 250 / 86%);
-    box-shadow: 0 24px 50px oklch(0 0 0 / 20%);
+    background: linear-gradient(145deg, oklch(0.18 0.022 246 / 88%), oklch(0.13 0.018 246 / 90%));
+    box-shadow: 0 20px 48px oklch(0 0 0 / 24%), inset 0 1px 0 oklch(1 0 0 / 5%);
     backdrop-filter: blur(24px);
   }
   .section-kicker {
@@ -86,4 +106,218 @@
     background: var(--primary);
     box-shadow: 0 0 12px oklch(0.79 0.144 169 / 75%);
   }
+  .assistant-chat-frame {
+    min-height: min(680px, calc(100dvh - 210px));
+    position: relative;
+    background: radial-gradient(circle at 78% 0%, oklch(0.36 0.09 190 / 13%), transparent 31rem), linear-gradient(145deg, oklch(0.14 0.021 246 / 96%), oklch(0.115 0.018 246 / 98%));
+    box-shadow: 0 28px 72px oklch(0 0 0 / 31%), inset 0 1px 0 oklch(1 0 0 / 7%);
+  }
+  .harb-assistant-layout {
+    display: grid;
+    min-height: 100dvh;
+    width: 100%;
+    direction: rtl;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .harb-sidebar { display: none !important; direction: rtl; grid-column: 1; grid-row: 1; }
+  .harb-workspace-main { direction: rtl; grid-column: 1; grid-row: 1; }
+  .harb-mobile-brand, .harb-mobile-actions { display: flex !important; }
+  .harb-desktop-greeting, .harb-language-badge, .harb-mode-label { display: none !important; }
+  @media (min-width: 640px) {
+    .harb-language-badge { display: inline-flex !important; }
+    .harb-mode-label { display: inline !important; }
+  }
+  @media (min-width: 1024px) {
+    .harb-assistant-layout { grid-template-columns: minmax(0, 1fr) 288px; }
+    .harb-sidebar { display: flex !important; width: auto; grid-column: 2; min-height: 100dvh; position: sticky; top: 0; }
+    .harb-workspace-main { grid-column: 1; }
+    .harb-mobile-brand, .harb-mobile-actions { display: none !important; }
+    .harb-desktop-greeting { display: block !important; }
+  }
+  .harb-command-label {
+    border: 1px solid oklch(0.79 0.144 169 / 22%);
+    background: oklch(0.79 0.144 169 / 8%);
+    color: oklch(0.86 0.09 169);
+    letter-spacing: 0.12em;
+  }
+  .harb-command-sidebar,
+  .harb-control-sidebar {
+    background: linear-gradient(180deg, oklch(0.125 0.02 246 / 96%), oklch(0.095 0.016 246 / 96%));
+    box-shadow: -16px 0 42px oklch(0 0 0 / 13%), inset 1px 0 0 oklch(1 0 0 / 4%);
+  }
+  .harb-workspace-header {
+    background: linear-gradient(90deg, oklch(0.115 0.019 246 / 88%), oklch(0.14 0.025 246 / 76%));
+  }
+  .harb-assistant-content {
+    background: linear-gradient(180deg, oklch(0.11 0.018 246 / 38%), transparent 18rem);
+  }
+  .harb-response-mode {
+    background: oklch(0.09 0.014 246 / 70%);
+    box-shadow: inset 0 1px 0 oklch(1 0 0 / 4%);
+  }
+  .harb-response-mode button[aria-pressed="true"],
+  .harb-response-mode button:hover {
+    background: oklch(0.79 0.12 173 / 10%);
+  }
+  .harb-chat-surface {
+    border-color: oklch(0.79 0.08 190 / 16%);
+  }
+  .harb-chatbox {
+    background: transparent;
+  }
+  .harb-chatbox-drag-active {
+    outline: 2px solid oklch(0.8 0.135 173 / 74%);
+    outline-offset: -2px;
+  }
+  .harb-file-drop-overlay {
+    position: absolute;
+    z-index: 20;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    pointer-events: none;
+    background: oklch(0.1 0.018 246 / 72%);
+    backdrop-filter: blur(5px);
+  }
+  .harb-file-drop-card {
+    width: min(100%, 30rem);
+    border: 1px dashed oklch(0.8 0.135 173 / 70%);
+    border-radius: 1.25rem;
+    padding: 1.5rem;
+    text-align: center;
+    background: linear-gradient(145deg, oklch(0.16 0.028 190 / 96%), oklch(0.12 0.02 246 / 96%));
+    box-shadow: 0 20px 46px oklch(0 0 0 / 32%);
+  }
+  .harb-chat-empty > div > div:first-child {
+    border: 1px solid oklch(0.79 0.11 173 / 12%);
+    background: oklch(0.79 0.11 173 / 6%);
+  }
+  .harb-suggestion-card {
+    position: relative;
+    overflow: hidden;
+    border-color: oklch(0.82 0.025 246 / 15%);
+    background: linear-gradient(135deg, oklch(0.16 0.021 246 / 76%), oklch(0.125 0.018 246 / 72%));
+  }
+  .harb-suggestion-card::after {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 3px;
+    height: 100%;
+    content: "";
+    background: var(--primary);
+    opacity: 0;
+    transition: opacity 160ms var(--ease-out, cubic-bezier(0.23, 1, 0.32, 1));
+  }
+  .harb-suggestion-card:hover::after { opacity: 0.8; }
+  .harb-message-bubble {
+    box-shadow: 0 10px 26px oklch(0 0 0 / 13%);
+  }
+  .harb-assistant-bubble {
+    background: linear-gradient(145deg, oklch(0.18 0.021 246 / 88%), oklch(0.135 0.018 246 / 90%));
+  }
+  .harb-user-bubble {
+    background: linear-gradient(145deg, oklch(0.8 0.135 173), oklch(0.7 0.12 180));
+  }
+  .harb-composer {
+    border-color: oklch(0.79 0.09 190 / 21%);
+    background: linear-gradient(135deg, oklch(0.12 0.02 246 / 96%), oklch(0.15 0.024 246 / 91%));
+    box-shadow: 0 16px 38px oklch(0 0 0 / 23%), inset 0 1px 0 oklch(1 0 0 / 5%);
+  }
+  .harb-file-drop-hint { background: oklch(0.14 0.018 246 / 46%); }
+  .harb-attachment-progress { background: linear-gradient(135deg, oklch(0.79 0.1 173 / 10%), oklch(0.13 0.02 246 / 84%)); }
+  .harb-progress-step { text-align: center; opacity: 0.48; }
+  .harb-progress-step-complete { color: var(--primary); font-weight: 600; opacity: 1; }
+  .harb-security-notice {
+    border-top: 1px solid oklch(0.82 0.025 246 / 8%);
+    padding-top: 0.6rem;
+  }
+  .harb-mobile-command-bar {
+    position: relative;
+    z-index: 5;
+    background: oklch(0.12 0.02 246 / 96%);
+    backdrop-filter: blur(18px);
+  }
+  .harb-control-layout { direction: rtl; }
+  .harb-control-main { background: linear-gradient(180deg, oklch(0.11 0.018 246 / 40%), transparent 22rem); }
+  .harb-control-header { position: relative; }
+  .harb-control-header::after {
+    position: absolute;
+    right: 0;
+    bottom: -1px;
+    width: 96px;
+    height: 1px;
+    content: "";
+    background: linear-gradient(90deg, transparent, var(--primary));
+  }
+  .harb-shell :is(button, a, input, textarea, select) { -webkit-tap-highlight-color: transparent; }
+  .harb-shell button:focus-visible, .harb-shell a:focus-visible, .harb-shell input:focus-visible, .harb-shell textarea:focus-visible, .harb-shell select:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+  .harb-shell select option { background: oklch(0.16 0.02 246); color: var(--foreground); }
+  .harb-shell .prose { --tw-prose-body: oklch(0.89 0.012 246); --tw-prose-headings: oklch(0.96 0.008 246); --tw-prose-links: var(--primary); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .assistant-chat-frame { animation: harb-chat-enter 240ms var(--ease-out, cubic-bezier(0.23, 1, 0.32, 1)); }
+}
+
+@keyframes harb-chat-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 639px) {
+  .harb-shell {
+    background: linear-gradient(145deg, oklch(0.09 0.017 246), oklch(0.13 0.02 246));
+  }
+  .harb-shell::before { display: none; }
+  .glass-panel, .harb-mobile-command-bar { backdrop-filter: none; }
+  .assistant-chat-frame { background: linear-gradient(145deg, oklch(0.14 0.021 246 / 96%), oklch(0.115 0.018 246 / 98%)); box-shadow: 0 16px 36px oklch(0 0 0 / 23%), inset 0 1px 0 oklch(1 0 0 / 7%); }
+  .harb-composer { box-shadow: 0 10px 24px oklch(0 0 0 / 18%), inset 0 1px 0 oklch(1 0 0 / 5%); }
+  .harb-assistant-content { padding-bottom: 0.75rem; }
+  .assistant-chat-frame { min-height: min(560px, calc(100dvh - 312px)); border-radius: 1.15rem; }
+  .harb-security-notice { align-items: flex-start; flex-direction: column; }
+  .harb-mode-label { display: none !important; }
+  .harb-control-sidebar { padding: 1rem; }
+  .harb-control-main { padding-bottom: 2rem; }
+}
+
+@media (prefers-reduced-data: reduce) {
+  .harb-shell { background: var(--background); }
+  .harb-shell::before { display: none; }
+  .glass-panel, .harb-mobile-command-bar, .harb-file-drop-overlay { backdrop-filter: none; }
+  .assistant-chat-frame, .harb-composer, .harb-message-bubble { box-shadow: none; }
+}
+
+@media (max-width: 1023px) {
+  .harb-control-sidebar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    padding: 0.7rem 1rem;
+    border-bottom: 1px solid oklch(0.82 0.025 246 / 12%);
+  }
+  .harb-control-sidebar > :first-child { flex: 0 0 auto; padding-inline: 0; }
+  .harb-control-sidebar > nav {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    gap: 0.35rem;
+    margin-top: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .harb-control-sidebar > nav::-webkit-scrollbar { display: none; }
+  .harb-control-sidebar > nav a {
+    flex: 0 0 auto;
+    padding: 0.52rem 0.65rem;
+    font-size: 0.75rem;
+    white-space: nowrap;
+  }
+  .harb-control-sidebar > div.mt-9,
+  .harb-control-sidebar > div.mt-6 { display: none; }
 }

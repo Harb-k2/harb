@@ -71,6 +71,27 @@
       "when": 1787511568188,
       "tag": "0009_far_zarek",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1787694427569,
+      "tag": "0010_hesitant_weapon_omega",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "5",
+      "when": 1787696094185,
+      "tag": "0011_amused_shotgun",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "5",
+      "when": 1787764024697,
+      "tag": "0012_easy_calypso",
+      "breakpoints": true
     }
   ]
 }
