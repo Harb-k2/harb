@@ -268,12 +268,26 @@
 }
 
 @media (max-width: 639px) {
+  .harb-shell {
+    background: linear-gradient(145deg, oklch(0.09 0.017 246), oklch(0.13 0.02 246));
+  }
+  .harb-shell::before { display: none; }
+  .glass-panel, .harb-mobile-command-bar { backdrop-filter: none; }
+  .assistant-chat-frame { background: linear-gradient(145deg, oklch(0.14 0.021 246 / 96%), oklch(0.115 0.018 246 / 98%)); box-shadow: 0 16px 36px oklch(0 0 0 / 23%), inset 0 1px 0 oklch(1 0 0 / 7%); }
+  .harb-composer { box-shadow: 0 10px 24px oklch(0 0 0 / 18%), inset 0 1px 0 oklch(1 0 0 / 5%); }
   .harb-assistant-content { padding-bottom: 0.75rem; }
   .assistant-chat-frame { min-height: min(560px, calc(100dvh - 312px)); border-radius: 1.15rem; }
   .harb-security-notice { align-items: flex-start; flex-direction: column; }
   .harb-mode-label { display: none !important; }
   .harb-control-sidebar { padding: 1rem; }
   .harb-control-main { padding-bottom: 2rem; }
+}
+
+@media (prefers-reduced-data: reduce) {
+  .harb-shell { background: var(--background); }
+  .harb-shell::before { display: none; }
+  .glass-panel, .harb-mobile-command-bar, .harb-file-drop-overlay { backdrop-filter: none; }
+  .assistant-chat-frame, .harb-composer, .harb-message-bubble { box-shadow: none; }
 }
 
 @media (max-width: 1023px) {

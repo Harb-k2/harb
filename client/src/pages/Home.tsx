@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { startLogin } from "@/const";
 import { trpc } from "@/lib/trpc";
 import { shouldLoadControlAudit } from "@/lib/queryPerformance";
+import { brandImageLoadingProps } from "@/lib/mediaPerformance";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
@@ -461,7 +462,7 @@ export default function Home() {
     <div className="harb-shell harb-control-shell min-h-screen" dir="rtl">
       <div className="harb-control-layout mx-auto grid min-h-screen max-w-[1600px] grid-cols-1 lg:grid-cols-[270px_minmax(0,1fr)]">
         <aside className="harb-control-sidebar border-b border-white/10 bg-[#101924]/70 p-5 backdrop-blur-xl lg:border-b-0 lg:border-l">
-          <div className="flex items-center gap-3 px-2"><img src="/manus-storage/harb-logo-mark_281c074b.png" alt="Harb" className="h-10 w-10 rounded-xl object-cover shadow-[0_10px_24px_oklch(0.79_0.144_169_/_16%)]" /><div><p className="font-bold tracking-tight">Harb</p><p className="text-xs text-muted-foreground">مركز السيطرة</p></div></div>
+          <div className="flex items-center gap-3 px-2"><img src="/manus-storage/harb-logo-mark_281c074b.png" alt="Harb" width="40" height="40" {...brandImageLoadingProps} className="h-10 w-10 rounded-xl object-cover shadow-[0_10px_24px_oklch(0.79_0.144_169_/_16%)]" /><div><p className="font-bold tracking-tight">Harb</p><p className="text-xs text-muted-foreground">مركز السيطرة</p></div></div>
           <nav className="mt-9 grid gap-1 text-sm">
             {[{ href: "#overview", label: "نظرة عامة", icon: Activity }, { href: "#studio", label: "الاستوديو التقني", icon: WandSparkles }, { href: "#cyber", label: "العمليات السيبرانية", icon: ShieldCheck }, { href: "#lab", label: "مختبر النموذج", icon: Beaker }, { href: "#tasks", label: "محادثة المهام", icon: MessageSquare }, { href: "#files", label: "مساحة الملفات", icon: FolderOpen }, { href: "#rules", label: "قوانين المالك", icon: Gavel }, { href: "#audit", label: "سجل التدقيق", icon: ScanLine }, { href: "#desktop", label: "عميل سطح المكتب", icon: Laptop }, { href: "#settings", label: "الإعدادات", icon: Settings }].map(item => <a key={item.href} href={item.href} className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground"><item.icon className="h-4 w-4" />{item.label}</a>)}
           </nav>

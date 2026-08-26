@@ -1,6 +1,7 @@
 import { AIChatBox, type AttachmentUploadProgress, type ChatAttachment, type Message } from "@/components/AIChatBox";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { brandImageLoadingProps } from "@/lib/mediaPerformance";
 import { cn } from "@/lib/utils";
 import {
   BarChart3,
@@ -145,7 +146,7 @@ export function HarbAssistantWorkspace({
       <div className="harb-assistant-layout mx-auto max-w-[1720px]">
         <aside className="harb-sidebar harb-command-sidebar min-w-0 flex-col border-l border-white/10 bg-[#0d1520]/80 px-4 py-5 backdrop-blur-xl">
           <div className="flex items-center gap-3 px-2">
-            <img src="/manus-storage/harb-logo-mark_281c074b.png" alt="Harb" className="h-10 w-10 rounded-2xl object-cover shadow-[0_12px_28px_oklch(0.79_0.144_169_/_18%)]" />
+            <img src="/manus-storage/harb-logo-mark_281c074b.png" alt="Harb" width="40" height="40" {...brandImageLoadingProps} className="h-10 w-10 rounded-2xl object-cover shadow-[0_12px_28px_oklch(0.79_0.144_169_/_18%)]" />
             <div>
               <p className="font-bold tracking-tight">Harb</p>
               <p className="text-xs text-muted-foreground">مساعدك المؤسسي</p>
@@ -208,7 +209,7 @@ export function HarbAssistantWorkspace({
         <main className="harb-workspace-main flex w-full min-w-0 flex-1 flex-col">
           <header className="harb-workspace-header flex min-h-16 items-center justify-between border-b border-white/10 bg-[#0d1520]/70 px-4 py-3 backdrop-blur-xl sm:px-7">
             <div className="min-w-0">
-              <div className="harb-mobile-brand items-center gap-2"><img src="/manus-storage/harb-logo-mark_281c074b.png" alt="Harb" className="h-8 w-8 rounded-xl object-cover" /><span className="font-bold">Harb</span></div>
+              <div className="harb-mobile-brand items-center gap-2"><img src="/manus-storage/harb-logo-mark_281c074b.png" alt="Harb" width="32" height="32" {...brandImageLoadingProps} className="h-8 w-8 rounded-xl object-cover" /><span className="font-bold">Harb</span></div>
               <div className="harb-desktop-greeting"><p className="text-sm font-semibold">مرحباً، {userName}</p><p className="mt-0.5 text-xs text-muted-foreground">مساعد واضح ومقيّد بقانون المالك</p></div>
             </div>
             <div className="flex items-center gap-2">
