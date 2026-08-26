@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createDocumentArtifact, createProjectArchive, createProjectPreview, normalizeProjectFilePath, normalizeProjectFiles, safeArtifactSlug } from "./technicalArtifacts";
+import { createDocumentArtifact, createProjectArchive, createProjectPreview, extractProjectArchiveFile, normalizeProjectFilePath, normalizeProjectFiles, safeArtifactSlug } from "./technicalArtifacts";
 import { buildSearchRequests, extractSearchSources } from "./webSearch";
 
 describe("technical artifact safety", () => {
@@ -34,6 +34,12 @@ describe("technical artifact safety", () => {
     expect(archive.subarray(0, 2).toString()).toBe("PK");
     expect(pdf.subarray(0, 4).toString()).toBe("%PDF");
     expect(docx.subarray(0, 2).toString()).toBe("PK");
+  });
+
+  it("extracts only a requested safe text file from a project ZIP", async () => {
+    const archive = await createProjectArchive([{ path: "src/main.ts", content: "export const harb = true;" }]);
+    await expect(extractProjectArchiveFile(archive, ".env")).rejects.toThrow("مسار الملف المطلوب غير صالح");
+    await expect(extractProjectArchiveFile(archive, "src/main.ts")).resolves.toMatchObject({ path: "src/main.ts", content: "export const harb = true;" });
   });
 });
 

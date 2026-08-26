@@ -181,6 +181,13 @@ export async function listFiles(ownerId: number) {
   return db.select().from(workspaceFiles).where(eq(workspaceFiles.ownerId, ownerId)).orderBy(desc(workspaceFiles.createdAt)).limit(50);
 }
 
+export async function getWorkspaceFile(ownerId: number, id: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(workspaceFiles).where(and(eq(workspaceFiles.id, id), eq(workspaceFiles.ownerId, ownerId))).limit(1);
+  return result[0];
+}
+
 export async function createWorkspaceFile(ownerId: number, values: Omit<typeof workspaceFiles.$inferInsert, "id" | "ownerId" | "createdAt">) {
   const db = await getDb();
   if (!db) throw new Error("قاعدة البيانات غير متاحة حالياً.");

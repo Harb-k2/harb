@@ -41,6 +41,7 @@ import {
   getCyberAsset,
   getCyberOperation,
   getKnowledgeSource,
+  getWorkspaceFile,
   isBaseModelSelectionStoreReady,
   listApprovals,
   listBenchmarkCases,
@@ -86,7 +87,7 @@ import { evaluateOwnerRules, toPolicyPrompt, type HarbRuleAction, type HarbScope
 import { evaluateCyberOperation, type CyberOperationType } from "./cyberPolicy";
 import { indexKnowledgeStorageObject } from "./knowledgeIndex";
 import { storageGetSignedUrl, storagePut } from "./storage";
-import { artifactMimeTypes, createDocumentArtifact, createProjectArchive, createProjectPreview, safeArtifactSlug, type ArtifactFormat } from "./technicalArtifacts";
+import { artifactMimeTypes, createDocumentArtifact, createProjectArchive, createProjectPreview, extractProjectArchiveFile, safeArtifactSlug, type ArtifactFormat } from "./technicalArtifacts";
 import { buildSearchRequests, extractSearchSources, type WebSearchMode } from "./webSearch";
 
 const scopeSchema = z.enum(["all", "general", "command", "file_change", "data_share"]);
@@ -384,6 +385,18 @@ export const appRouter = router({
           await createAuditEntry(ctx.user.id, { eventType: "studio.project_created", requestId: preflight.task.id, outcome: "failed", summary: "تعذر إنشاء حزمة مشروع Harb.", ruleIds: preflight.ruleIds, metadata: JSON.stringify({ error: error instanceof Error ? error.message : "unknown" }) });
           throw error;
         }
+      }),
+      readProjectFile: protectedProcedure.input(z.object({ workspaceFileId: z.string().min(1).max(64), path: z.string().min(1).max(180) })).query(async ({ ctx, input }) => {
+        const workspaceFile = await getWorkspaceFile(ctx.user.id, input.workspaceFileId);
+        if (!workspaceFile || workspaceFile.mimeType !== artifactMimeTypes.zip) throw new Error("حزمة المشروع غير موجودة أو لا تملك صلاحية الوصول إليها.");
+        if (workspaceFile.permissionState !== "allowed" || workspaceFile.approvalState === "rejected") throw new Error("لا تسمح حالة الملف الحالية بقراءة محتوى الحزمة.");
+        const signedUrl = await storageGetSignedUrl(workspaceFile.storageKey);
+        const response = await fetch(signedUrl);
+        if (!response.ok) throw new Error("تعذر قراءة حزمة المشروع الخاصة.");
+        const archive = Buffer.from(await response.arrayBuffer());
+        const file = await extractProjectArchiveFile(archive, input.path);
+        await createAuditEntry(ctx.user.id, { eventType: "studio.project_file_read", requestId: null, outcome: "completed", summary: `عُرض ملف مشروع فردي من الحزمة: ${file.path}`, ruleIds: "", metadata: JSON.stringify({ workspaceFileId: workspaceFile.id, path: file.path, size: file.size }) });
+        return file;
       }),
       createDocument: protectedProcedure.input(z.object({ title: z.string().trim().min(3).max(180), content: z.string().trim().min(1).max(50_000), format: z.enum(["pdf", "docx", "txt"]) })).mutation(async ({ ctx, input }) => {
         const preflight = await runStudioPreflight(ctx.user.id, `إنشاء مستند ${input.format}: ${input.title}`);

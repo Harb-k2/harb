@@ -2,6 +2,7 @@ import * as archiverModule from "archiver";
 import { Document, HeadingLevel, Packer, Paragraph } from "docx";
 import { createRequire } from "node:module";
 import PDFDocument from "pdfkit";
+import * as unzipper from "unzipper";
 
 export type ArtifactFormat = "zip" | "pdf" | "docx" | "txt";
 export type ProjectFile = { path: string; content: string };
@@ -53,6 +54,20 @@ export function createProjectPreview(files: ProjectFile[], maxFileBytes = 18_000
       lineCount: file.content.split("\n").length,
     } satisfies ProjectPreviewFile;
   });
+}
+
+export async function extractProjectArchiveFile(archive: Buffer, requestedPath: string, maxFileBytes = 120_000) {
+  const safePath = normalizeProjectFilePath(requestedPath);
+  if (!safePath) throw new Error("مسار الملف المطلوب غير صالح.");
+  if (archive.length > 8 * 1024 * 1024) throw new Error("تعذر فتح حزمة أكبر من حد المعاينة الآمن.");
+  const directory = await unzipper.Open.buffer(archive);
+  if (directory.files.length > 20) throw new Error("تتجاوز الحزمة حد ملفات المعاينة.");
+  const entry = directory.files.find(file => file.type === "File" && file.path === safePath);
+  if (!entry) throw new Error("الملف غير موجود داخل الحزمة أو غير مسموح بمعاينته.");
+  const buffer = await entry.buffer();
+  if (buffer.length > maxFileBytes) throw new Error("يتجاوز الملف حد النسخ والتنزيل الفردي الآمن.");
+  if (buffer.includes(0)) throw new Error("لا يمكن تنزيل ملف ثنائي من محرر الكود.");
+  return { path: safePath, content: buffer.toString("utf8"), size: buffer.length };
 }
 
 export async function createProjectArchive(files: ProjectFile[]) {
