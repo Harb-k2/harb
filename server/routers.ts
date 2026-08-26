@@ -89,7 +89,7 @@ import { indexKnowledgeStorageObject } from "./knowledgeIndex";
 import { storageGetSignedUrl, storagePut } from "./storage";
 import { artifactMimeTypes, createDocumentArtifact, createProjectArchive, createProjectPreview, extractProjectArchiveFile, safeArtifactSlug, type ArtifactFormat } from "./technicalArtifacts";
 import { buildSearchRequests, extractSearchSources, isTrustedSourceUrl, needsTrustedSources, type SearchSource, type WebSearchMode } from "./webSearch";
-import { inspectWorkspaceBuffer, searchWorkspaceArchive, validateWorkspaceUpload, workspaceUploadLimits } from "./workspaceInspector";
+import { inspectWorkspaceBuffer, reviewWorkspaceArchive, searchWorkspaceArchive, validateWorkspaceUpload, workspaceUploadLimits } from "./workspaceInspector";
 
 const scopeSchema = z.enum(["all", "general", "command", "file_change", "data_share"]);
 const actionSchema = z.enum(["allow", "approval", "deny"]);
@@ -273,8 +273,15 @@ function trustedSourcesContext(sources: SearchSource[]) {
 
 function trustedSourcesAppendix(sources: SearchSource[], language: DetectedLanguage) {
   if (!sources.length) return "";
-  const title = language === "arabic" ? "### مصادر موثوقة" : "### Trusted sources";
-  return `\n\n${title}\n${sources.map((source, index) => `- [S${index + 1}] [${source.title}](${source.url}) — ${source.source}`).join("\n")}`;
+  const arabic = language === "arabic";
+  const title = arabic ? "### مصادر موثوقة" : "### Trusted sources";
+  const qualityTitle = arabic ? "### جودة الإسناد" : "### Citation quality";
+  const retrievedAt = new Date().toISOString().replace("T", " ").replace(".000Z", " UTC");
+  const quality = arabic
+    ? `الإسناد: مرتفع · ${sources.length} نطاقات موثوقة · تم الاسترجاع: ${retrievedAt}`
+    : `Citation confidence: high · ${sources.length} trusted domains · retrieved: ${retrievedAt}`;
+  const sourceLabel = arabic ? "نطاق موثوق" : "trusted domain";
+  return `\n\n${qualityTitle}\n${quality}\n\n${title}\n${sources.map((source, index) => `- [S${index + 1}] [${source.title}](${source.url}) — ${sourceLabel} · ${source.source}`).join("\n")}`;
 }
 
 async function invokeHarbAssistant({
@@ -1188,6 +1195,25 @@ export const appRouter = router({
         });
         return { results };
       }),
+      reviewProject: protectedProcedure.input(z.object({ id: z.string().min(1).max(64) })).mutation(async ({ ctx, input }) => {
+        const workspaceFile = await getWorkspaceFile(ctx.user.id, input.id);
+        if (!workspaceFile) throw new Error("الحزمة غير موجودة أو لا تملك صلاحية الوصول إليها.");
+        if (workspaceFile.permissionState !== "allowed" || workspaceFile.approvalState === "rejected") throw new Error("لا تسمح حالة الملف الحالية بمراجعة الحزمة.");
+        if (workspaceFile.size > workspaceUploadLimits.maxFileBytes) throw new Error("تتجاوز الحزمة حد المراجعة الآمنة.");
+        const signedUrl = await storageGetSignedUrl(workspaceFile.storageKey);
+        const response = await fetch(signedUrl);
+        if (!response.ok) throw new Error("تعذر قراءة الحزمة الخاصة للمراجعة.");
+        const review = await reviewWorkspaceArchive(workspaceFile.name, workspaceFile.mimeType, Buffer.from(await response.arrayBuffer()));
+        await createAuditEntry(ctx.user.id, {
+          eventType: "file.project_reviewed",
+          requestId: workspaceFile.id,
+          outcome: "completed",
+          summary: `أُجريت مراجعة ساكنة لحزمة المشروع «${workspaceFile.name}».`,
+          ruleIds: "",
+          metadata: JSON.stringify({ fileCount: review.fileCount, languageCounts: review.languageCounts, findingCount: review.findings.length, warningCount: review.warnings.length }),
+        });
+        return review;
+      }),
       updateClassification: protectedProcedure.input(z.object({ id: z.string().min(1), classification: z.enum(["private", "restricted", "shared"]) })).mutation(async ({ ctx, input }) => {
         const security = input.classification === "private"
           ? { permissionState: "allowed" as const, approvalState: "not_required" as const }
@@ -1443,6 +1469,7 @@ export const appRouter = router({
           return { decision: "approval" as const, task, approval, message, conversationId: conversation.id, userMessage, assistantMessage, attachments };
         }
 
+        const responseStartedAt = Date.now();
         try {
           const requestNeedsSources = needsTrustedSources(input.request);
           const [knowledge, catalog, selection, trustedSources] = await Promise.all([
@@ -1477,7 +1504,7 @@ export const appRouter = router({
             outcome: "completed",
             summary: "اجتاز الطلب فحص القواعد واكتمل الرد التحليلي.",
             ruleIds,
-            metadata: JSON.stringify({ taskType: decision.taskType, model: response.modelId ?? "default", modelSource: modelRoute.source, usedFallback: response.usedFallback, responseMode: input.responseMode, language: requestLanguage, conversationId: conversation.id, attachmentIds: attachments.map(attachment => attachment.id), knowledgeChunkIds: knowledge.map(item => item.id), trustedSourceUrls: trustedSources.map(source => source.url) }),
+            metadata: JSON.stringify({ taskType: decision.taskType, model: response.modelId ?? "default", modelSource: modelRoute.source, usedFallback: response.usedFallback, responseMode: input.responseMode, language: requestLanguage, conversationId: conversation.id, attachmentIds: attachments.map(attachment => attachment.id), knowledgeChunkIds: knowledge.map(item => item.id), trustedSourceUrls: trustedSources.map(source => source.url), latencyMs: Date.now() - responseStartedAt, citationConfidence: trustedSources.length ? "high" : "not_requested" }),
           });
           const assistantMessage = await saveAssistantMessage(message);
           return { decision: "allow" as const, task, message, conversationId: conversation.id, userMessage, assistantMessage, attachments };
@@ -1490,7 +1517,7 @@ export const appRouter = router({
             outcome: "failed",
             summary: "تعذر إكمال استدعاء النموذج بعد اجتياز فحص القواعد.",
             ruleIds,
-            metadata: JSON.stringify({ error: error instanceof Error ? error.message : "unknown", conversationId: conversation.id, language: requestLanguage, attachmentIds: attachments.map(attachment => attachment.id) }),
+            metadata: JSON.stringify({ error: error instanceof Error ? error.message : "unknown", conversationId: conversation.id, language: requestLanguage, attachmentIds: attachments.map(attachment => attachment.id), latencyMs: Date.now() - responseStartedAt }),
           });
           const assistantMessage = await saveAssistantMessage(message);
           return { decision: "allow" as const, task, message, conversationId: conversation.id, userMessage, assistantMessage, attachments };

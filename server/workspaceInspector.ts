@@ -24,6 +24,7 @@ export type WorkspaceInspection = {
 };
 
 export type ArchiveSearchResult = { path: string; match: "name" | "content"; line?: number; snippet?: string };
+export type ArchiveStaticReview = { fileCount: number; languageCounts: Array<{ language: string; count: number }>; findings: string[]; warnings: string[] };
 
 function extensionOf(name: string) {
   const last = name.trim().toLowerCase().split(".").pop();
@@ -98,4 +99,41 @@ export async function searchWorkspaceArchive(name: string, mimeType: string, buf
     results.push({ path, match: "content", line, snippet: content.slice(start, end).replace(/\s+/g, " ").trim() });
   }
   return results.slice(0, workspaceUploadLimits.maxArchiveSearchResults);
+}
+
+function languageForPath(path: string) {
+  const extension = extensionOf(path);
+  const labels: Record<string, string> = { ts: "TypeScript", tsx: "TypeScript", js: "JavaScript", jsx: "JavaScript", py: "Python", go: "Go", rs: "Rust", java: "Java", php: "PHP", c: "C/C++", cc: "C/C++", cpp: "C/C++", h: "C/C++", hpp: "C/C++", cs: "C#", html: "HTML", css: "CSS", sql: "SQL", sh: "Shell", md: "Markdown", json: "JSON", yaml: "YAML", yml: "YAML" };
+  return labels[extension] ?? null;
+}
+
+export async function reviewWorkspaceArchive(name: string, mimeType: string, buffer: Buffer): Promise<ArchiveStaticReview> {
+  if (getWorkspaceFileKind(name, mimeType) !== "archive") throw new Error("المراجعة الساكنة متاحة لحزم ZIP فقط.");
+  if (buffer.length > workspaceUploadLimits.maxFileBytes) throw new Error("تتجاوز الحزمة حد المراجعة الآمنة.");
+  const directory = await unzipper.Open.buffer(buffer);
+  if (directory.files.length > workspaceUploadLimits.maxZipEntries) throw new Error("تتجاوز الحزمة حد المراجعة الآمنة.");
+  const files = directory.files.filter(entry => entry.type === "File");
+  const unsafePaths = files.filter(entry => !normalizeProjectFilePath(entry.path)).map(entry => entry.path);
+  const languageCounts = new Map<string, number>();
+  const findings: string[] = [];
+  let todoCount = 0;
+  for (const entry of files) {
+    const path = normalizeProjectFilePath(entry.path);
+    if (!path) continue;
+    const language = languageForPath(path);
+    if (language) languageCounts.set(language, (languageCounts.get(language) ?? 0) + 1);
+    if (!getWorkspaceFileKind(path, "text/plain") || entry.uncompressedSize > workspaceUploadLimits.maxArchiveSearchBytesPerFile) continue;
+    const entryBuffer = await entry.buffer();
+    if (entryBuffer.includes(0)) continue;
+    todoCount += (entryBuffer.toString("utf8").match(/\b(?:TODO|FIXME)\b/gi) ?? []).length;
+  }
+  if (files.some(entry => normalizeProjectFilePath(entry.path) === "README.md")) findings.push("يتضمن المشروع ملف README للمراجعة الأولية.");
+  else findings.push("لا يوجد README.md ضمن الحزمة؛ يُستحسن توثيق التشغيل والبنية قبل المشاركة.");
+  if (files.some(entry => normalizeProjectFilePath(entry.path) === "package.json")) findings.push("تحتوي الحزمة على package.json؛ راجع الاعتمادات محلياً قبل التثبيت.");
+  if (todoCount) findings.push(`عُثر على ${todoCount} وسم TODO/FIXME ضمن الملفات النصية المسموح بها.`);
+  const warnings = [
+    ...(unsafePaths.length ? [`استُبعدت ${unsafePaths.length} مسارات غير آمنة أو ملفات بيئية من المراجعة.`] : []),
+    "هذه مراجعة ساكنة فقط؛ لا يشغّل Harb الشيفرة أو يثبت الاعتمادات أو ينشر المشروع.",
+  ];
+  return { fileCount: files.length, languageCounts: Array.from(languageCounts, ([language, count]) => ({ language, count })).sort((a, b) => b.count - a.count), findings, warnings };
 }

@@ -7,6 +7,7 @@ import { BenchmarkPanel } from "@/components/BenchmarkPanel";
 import { KnowledgeControlPanel } from "@/components/KnowledgeControlPanel";
 import { TechnicalStudioPanel } from "@/components/TechnicalStudioPanel";
 import { WorkspaceBatchUpload } from "@/components/WorkspaceBatchUpload";
+import { QualityInsightsPanel } from "@/components/QualityInsightsPanel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -467,6 +468,8 @@ export default function Home() {
           <section id="overview" className="scroll-mt-6"><div className="mb-4 flex items-center justify-between"><div><p className="section-kicker">الحالة التشغيلية</p><h2 className="mt-1 text-xl font-bold">نظرة عامة</h2></div><Badge variant="outline" className="border-primary/20 bg-primary/5 text-primary">آخر مزامنة الآن</Badge></div><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><Metric label="قوانين فعالة" value={activeRules} hint="تُفحص حسب الأولوية" icon={Gavel} /><Metric label="مهام مسجلة" value={tasks.length} hint="تشمل القرارات والنتائج" icon={Activity} /><Metric label="موافقات معلقة" value={pendingApprovals} hint="لن تنفذ قبل القرار" icon={KeyRound} /><Metric label="ملفات خاصة" value={files.length} hint="محفوظة مع بياناتها الوصفية" icon={FolderOpen} /></div></section>
 
           <section id="settings" className="mt-7 scroll-mt-6"><div className="glass-panel rounded-2xl p-5"><div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><p className="section-kicker">Harb Settings</p><h2 className="mt-1 text-xl font-bold">إعدادات المشروع والجلسة</h2><p className="mt-1 text-sm text-muted-foreground">إعدادات تشغيل واضحة تحافظ على سرعة الاستجابة والحوكمة دون كشف مفاتيح أو بيانات حساسة.</p></div><Button variant="outline" onClick={() => setWorkspace("assistant")} className="w-fit border-white/15 bg-white/5"><MessageSquare className="ml-2 h-4 w-4" />فتح المحادثة</Button></div><div className="mt-5 grid gap-3 md:grid-cols-3"><article className="rounded-xl border border-white/10 bg-black/10 p-4"><p className="text-sm font-semibold">أداء الاستجابة</p><p className="mt-2 text-xs leading-5 text-muted-foreground">النمط المختصر يستخدم سقفاً أدنى للاستدلال والسياق؛ يبقى التحليل العميق متاحاً عند الحاجة.</p></article><article className="rounded-xl border border-white/10 bg-black/10 p-4"><p className="text-sm font-semibold">المصادر الموثوقة</p><p className="mt-2 text-xs leading-5 text-muted-foreground">يُطلب بحث خارجي فقط عند طلب المراجع أو المعلومات الحديثة، وتعرض المصادر الرسمية في الرد.</p></article><article className="rounded-xl border border-white/10 bg-black/10 p-4"><p className="text-sm font-semibold">حالة الجلسة</p><p className="mt-2 text-xs leading-5 text-muted-foreground">متصل باسم {user.name || "المالك"}. يمكنك إنهاء الجلسة من الشريط الجانبي أو هنا.</p><Button variant="ghost" size="sm" onClick={logout} className="mt-2 h-8 px-0 text-rose-200 hover:bg-transparent hover:text-rose-100"><LogOut className="ml-1.5 h-3.5 w-3.5" />تسجيل الخروج</Button></article></div></div></section>
+
+          <QualityInsightsPanel tasks={dashboard.data?.tasks ?? []} audit={dashboard.data?.audit ?? []} />
 
           <TechnicalStudioPanel />
 

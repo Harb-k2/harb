@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createProjectArchive } from "./technicalArtifacts";
-import { getWorkspaceFileKind, inspectWorkspaceBuffer, searchWorkspaceArchive, validateWorkspaceUpload, workspaceUploadLimits } from "./workspaceInspector";
+import { getWorkspaceFileKind, inspectWorkspaceBuffer, reviewWorkspaceArchive, searchWorkspaceArchive, validateWorkspaceUpload, workspaceUploadLimits } from "./workspaceInspector";
 
 describe("workspace upload inspection", () => {
   it("accepts supported code and archive files while rejecting unsupported binary uploads", () => {
@@ -22,5 +22,13 @@ describe("workspace upload inspection", () => {
     const results = await searchWorkspaceArchive("project.zip", "application/zip", archive, "owner");
     expect(results).toEqual(expect.arrayContaining([expect.objectContaining({ path: "src/auth.ts", match: "content", line: 1, snippet: expect.stringContaining("validateOwnerToken") })]));
     expect(results.length).toBeLessThanOrEqual(workspaceUploadLimits.maxArchiveSearchResults);
+  });
+
+  it("reviews a project archive statically without running its content", async () => {
+    const archive = await createProjectArchive([{ path: "src/app.ts", content: "// TODO: add validation\nexport const app = true;" }, { path: "package.json", content: "{\"name\":\"demo\"}" }]);
+    const review = await reviewWorkspaceArchive("project.zip", "application/zip", archive);
+    expect(review.languageCounts).toContainEqual({ language: "TypeScript", count: 1 });
+    expect(review.findings.join(" ")).toContain("TODO");
+    expect(review.warnings.join(" ")).toContain("مراجعة ساكنة");
   });
 });
