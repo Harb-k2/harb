@@ -2,6 +2,27 @@ export type WebSearchMode = "multi" | "google" | "bing" | "news" | "images";
 export type SearchRequestDefinition = { engine: "google" | "bing"; label: string; params: Record<string, string> };
 export type SearchSource = { title: string; url: string; snippet: string; source: string; position: number; imageUrl?: string };
 
+const trustedHostSuffixes = [
+  ".gov", ".gov.uk", ".edu", ".ac.uk", ".int",
+  "cisa.gov", "nist.gov", "owasp.org", "mitre.org", "w3.org", "iana.org", "mozilla.org", "github.com", "developer.android.com", "learn.microsoft.com", "docs.python.org", "nodejs.org",
+];
+
+export function isTrustedSourceUrl(value: string) {
+  try {
+    const hostname = new URL(value).hostname.toLowerCase();
+    return trustedHostSuffixes.some(suffix => {
+      const bareSuffix = suffix.replace(/^\./, "");
+      return hostname === bareSuffix || hostname.endsWith(`.${bareSuffix}`);
+    });
+  } catch {
+    return false;
+  }
+}
+
+export function needsTrustedSources(request: string) {
+  return /\b(latest|current|official|sources?|references?|research|documentation|docs?|news|update)\b|مصادر|مراجع|بحث|ابحث|موثوق|رسمي|وثائق|أحدث|تحديث|خبر/i.test(request);
+}
+
 export function buildSearchRequests(query: string, mode: WebSearchMode, language: "ar" | "en") {
   const shared = { q: query, hl: language, safe: "active" };
   if (mode === "bing") return [{ engine: "bing", label: "Bing", params: shared } satisfies SearchRequestDefinition];

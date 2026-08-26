@@ -8,6 +8,7 @@ import {
   Code2,
   ChevronLeft,
   FileCheck2,
+  FolderKanban,
   Gavel,
   History,
   LayoutDashboard,
@@ -15,8 +16,10 @@ import {
   MessageSquarePlus,
   PanelRightOpen,
   Search,
+  Settings,
   ShieldCheck,
   Sparkles,
+  LogOut,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -36,7 +39,11 @@ type HarbAssistantWorkspaceProps = {
   onOpenControlCenter: () => void;
   onOpenTechnicalStudio: () => void;
   onOpenWebSearch: () => void;
+  onOpenProjects: () => void;
+  onOpenSettings: () => void;
+  onLogout: () => void;
   conversations: Array<{ id: string; title: string; detectedLanguage: string; updatedAt: Date | string }>;
+  projects: Array<{ id: string; name: string; createdAt: Date | string }>;
   activeConversationId?: string;
   feedbackByMessage: Record<string, "up" | "down">;
   onSelectConversation: (conversationId: string) => void;
@@ -105,7 +112,11 @@ export function HarbAssistantWorkspace({
   onOpenControlCenter,
   onOpenTechnicalStudio,
   onOpenWebSearch,
+  onOpenProjects,
+  onOpenSettings,
+  onLogout,
   conversations,
+  projects,
   activeConversationId,
   feedbackByMessage,
   onSelectConversation,
@@ -149,8 +160,10 @@ export function HarbAssistantWorkspace({
           <nav className="mt-6 space-y-1">
             <NavigationItem icon={Bot} label="المحادثة" active />
             <NavigationItem icon={Code2} label="الاستوديو التقني" onClick={onOpenTechnicalStudio} />
+            <NavigationItem icon={FolderKanban} label="المشاريع" onClick={onOpenProjects} />
             <NavigationItem icon={Search} label="بحث المصادر" onClick={onOpenWebSearch} />
             <NavigationItem icon={LayoutDashboard} label="مركز العمليات" onClick={onOpenControlCenter} />
+            <NavigationItem icon={Settings} label="الإعدادات" onClick={onOpenSettings} />
           </nav>
 
           <div className="mt-7 min-h-0 flex-1 border-t border-white/10 pt-5">
@@ -166,6 +179,13 @@ export function HarbAssistantWorkspace({
           </div>
 
           <div className="mt-5 border-t border-white/10 pt-5">
+            <div className="flex items-center justify-between px-2"><p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">المشاريع الأخيرة</p><FolderKanban className="h-3.5 w-3.5 text-muted-foreground" /></div>
+            <div className="mt-3 max-h-28 space-y-1 overflow-y-auto pr-1">
+              {projects.length ? projects.slice(0, 4).map(project => <button key={project.id} type="button" onClick={onOpenProjects} className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-right text-xs text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground"><Code2 className="h-3.5 w-3.5 shrink-0 text-primary" /><span className="truncate">{project.name}</span></button>) : <p className="rounded-xl border border-dashed border-white/10 p-3 text-center text-[11px] leading-5 text-muted-foreground">تظهر حزم المشاريع هنا بعد إنشائها.</p>}
+            </div>
+          </div>
+
+          <div className="mt-5 border-t border-white/10 pt-5">
             <p className="px-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">سياق محكوم</p>
             <div className="mt-3 space-y-1">
               <NavigationItem icon={Gavel} label={`${activeRules} قوانين فعّالة`} onClick={onOpenControlCenter} />
@@ -177,6 +197,11 @@ export function HarbAssistantWorkspace({
           <div className="mt-auto rounded-2xl border border-primary/20 bg-primary/5 p-4">
             <div className="flex items-center gap-2 text-sm font-semibold text-primary"><ShieldCheck className="h-4 w-4" />حماية Harb مفعّلة</div>
             <p className="mt-2 text-xs leading-5 text-muted-foreground">يُفحص كل طلب بقانون المالك قبل استدعاء النموذج أو طلب أي موافقة.</p>
+          </div>
+          <div className="mt-3 flex items-center gap-3 rounded-2xl border border-white/10 bg-black/10 p-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-bold text-primary">{userName.slice(0, 1) || "م"}</span>
+            <div className="min-w-0 flex-1"><p className="truncate text-xs font-semibold">{userName}</p><p className="mt-0.5 text-[10px] text-primary">الجلسة متصلة</p></div>
+            <Button type="button" variant="ghost" size="icon" onClick={onLogout} className="h-8 w-8 text-muted-foreground hover:bg-white/5 hover:text-foreground" aria-label="تسجيل الخروج"><LogOut className="h-4 w-4" /></Button>
           </div>
         </aside>
 
