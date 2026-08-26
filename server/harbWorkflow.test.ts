@@ -482,6 +482,30 @@ describe("Harb permission workflows", () => {
     expect(db.createAuditEntry).toHaveBeenCalledWith(7, expect.objectContaining({ eventType: "lab.public_source_registered" }));
   });
 
+  it("يسجل مصدر شبكة من ملف المالك للتقييم فقط مع مراجعة حقوق وبدون نقل محتوى", async () => {
+    const result = await appRouter.createCaller(createContext()).harb.lab.sources.registerPublicReference({ collectionId: "collection-01", sourceId: "cic_ids_2017" });
+
+    expect(result).toEqual(expect.objectContaining({ id: "source-01" }));
+    expect(db.registerKnowledgeSource).toHaveBeenCalledWith(7, expect.objectContaining({
+      sourceType: "public_reference",
+      sourceCategory: "cyber_network",
+      usageScope: "evaluation_only",
+      reviewStatus: "rights_review_required",
+      sourceUrl: "https://www.unb.ca/cic/datasets/ids-2017.html",
+      storageKey: null,
+      chunkCount: 0,
+    }));
+    expect(storage.storagePut).not.toHaveBeenCalled();
+    expect(knowledgeIndex.indexKnowledgeStorageObject).not.toHaveBeenCalled();
+  });
+
+  it("يرفض فهرسة مرجع عام قبل مراجعة الحقوق أو المحتوى", async () => {
+    db.getKnowledgeSource.mockResolvedValueOnce({ id: "source-01", collectionId: "collection-01", sourceType: "public_reference", storageKey: null, mimeType: "text/html" });
+
+    await expect(appRouter.createCaller(createContext()).harb.lab.sources.index({ sourceId: "source-01" })).rejects.toThrow("لا يمكن فهرسة هذا المرجع تلقائياً");
+    expect(knowledgeIndex.indexKnowledgeStorageObject).not.toHaveBeenCalled();
+  });
+
   it("يفهرس مصدراً نصياً إلى مقتطفات محدودة قابلة للاسترجاع", async () => {
     const result = await appRouter.createCaller(createContext()).harb.lab.sources.index({ sourceId: "source-01" });
 
