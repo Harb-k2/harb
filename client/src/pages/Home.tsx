@@ -1,13 +1,6 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { AIChatBox, type AttachmentUploadProgress, type ChatAttachment, type Message } from "@/components/AIChatBox";
 import { HarbAssistantWorkspace, type ResponseMode } from "@/components/HarbAssistantWorkspace";
-import { CyberOperationsPanel } from "@/components/CyberOperationsPanel";
-import { ModelLabPanel } from "@/components/ModelLabPanel";
-import { BenchmarkPanel } from "@/components/BenchmarkPanel";
-import { KnowledgeControlPanel } from "@/components/KnowledgeControlPanel";
-import { TechnicalStudioPanel } from "@/components/TechnicalStudioPanel";
-import { WorkspaceBatchUpload } from "@/components/WorkspaceBatchUpload";
-import { QualityInsightsPanel } from "@/components/QualityInsightsPanel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -16,6 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { startLogin } from "@/const";
 import { trpc } from "@/lib/trpc";
+import { shouldLoadControlAudit } from "@/lib/queryPerformance";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
@@ -44,7 +38,7 @@ import {
   TerminalSquare,
   WandSparkles,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
 type RuleScope = "all" | "general" | "command" | "file_change" | "data_share";
 type RuleAction = "allow" | "approval" | "deny";
@@ -96,6 +90,18 @@ const taskStatus = {
   completed: { label: "مكتمل", className: "text-emerald-200 bg-emerald-400/10 border-emerald-300/15" },
   failed: { label: "تعذّر", className: "text-rose-200 bg-rose-400/10 border-rose-300/15" },
 };
+
+const CyberOperationsPanel = lazy(() => import("@/components/CyberOperationsPanel").then(module => ({ default: module.CyberOperationsPanel })));
+const ModelLabPanel = lazy(() => import("@/components/ModelLabPanel").then(module => ({ default: module.ModelLabPanel })));
+const BenchmarkPanel = lazy(() => import("@/components/BenchmarkPanel").then(module => ({ default: module.BenchmarkPanel })));
+const KnowledgeControlPanel = lazy(() => import("@/components/KnowledgeControlPanel").then(module => ({ default: module.KnowledgeControlPanel })));
+const TechnicalStudioPanel = lazy(() => import("@/components/TechnicalStudioPanel").then(module => ({ default: module.TechnicalStudioPanel })));
+const WorkspaceBatchUpload = lazy(() => import("@/components/WorkspaceBatchUpload").then(module => ({ default: module.WorkspaceBatchUpload })));
+const QualityInsightsPanel = lazy(() => import("@/components/QualityInsightsPanel").then(module => ({ default: module.QualityInsightsPanel })));
+
+function ControlPanelFallback() {
+  return <div className="mt-7 flex min-h-28 items-center justify-center gap-2 rounded-2xl border border-white/10 bg-black/10 p-5 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin text-primary" />يجري تجهيز لوحة التحكم…</div>;
+}
 
 function formatDate(value: Date | string | null) {
   if (!value) return "—";
@@ -238,12 +244,13 @@ export default function Home() {
   const [attachmentProgress, setAttachmentProgress] = useState<AttachmentUploadProgress | null>(null);
   const [isAnalyzingAttachments, setIsAnalyzingAttachments] = useState(false);
   const [auditSearch, setAuditSearch] = useState("");
+  const deferredAuditSearch = useDeferredValue(auditSearch);
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const attachmentUploadAbortRef = useRef<AbortController | null>(null);
   const attachmentProgressTimerRef = useRef<number | null>(null);
-  const dashboard = trpc.harb.dashboard.useQuery(undefined, { enabled: isAuthenticated });
-  const audit = trpc.harb.audit.list.useQuery({ search: auditSearch }, { enabled: isAuthenticated });
-  const conversations = trpc.harb.conversations.list.useQuery(undefined, { enabled: isAuthenticated });
+  const dashboard = trpc.harb.dashboard.useQuery(undefined, { enabled: isAuthenticated, staleTime: 20_000, refetchOnWindowFocus: false });
+  const audit = trpc.harb.audit.list.useQuery({ search: deferredAuditSearch }, { enabled: shouldLoadControlAudit(isAuthenticated, workspace), staleTime: 15_000, refetchOnWindowFocus: false });
+  const conversations = trpc.harb.conversations.list.useQuery(undefined, { enabled: isAuthenticated, staleTime: 20_000, refetchOnWindowFocus: false });
   const conversationInput = useMemo(() => ({ conversationId: activeConversationId ?? "unselected" }), [activeConversationId]);
   const activeConversation = trpc.harb.conversations.get.useQuery(conversationInput, { enabled: isAuthenticated && Boolean(activeConversationId) });
   const refresh = () => { void utils.harb.dashboard.invalidate(); void utils.harb.audit.list.invalidate(); };
@@ -469,17 +476,17 @@ export default function Home() {
 
           <section id="settings" className="mt-7 scroll-mt-6"><div className="glass-panel rounded-2xl p-5"><div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><p className="section-kicker">Harb Settings</p><h2 className="mt-1 text-xl font-bold">إعدادات المشروع والجلسة</h2><p className="mt-1 text-sm text-muted-foreground">إعدادات تشغيل واضحة تحافظ على سرعة الاستجابة والحوكمة دون كشف مفاتيح أو بيانات حساسة.</p></div><Button variant="outline" onClick={() => setWorkspace("assistant")} className="w-fit border-white/15 bg-white/5"><MessageSquare className="ml-2 h-4 w-4" />فتح المحادثة</Button></div><div className="mt-5 grid gap-3 md:grid-cols-3"><article className="rounded-xl border border-white/10 bg-black/10 p-4"><p className="text-sm font-semibold">أداء الاستجابة</p><p className="mt-2 text-xs leading-5 text-muted-foreground">النمط المختصر يستخدم سقفاً أدنى للاستدلال والسياق؛ يبقى التحليل العميق متاحاً عند الحاجة.</p></article><article className="rounded-xl border border-white/10 bg-black/10 p-4"><p className="text-sm font-semibold">المصادر الموثوقة</p><p className="mt-2 text-xs leading-5 text-muted-foreground">يُطلب بحث خارجي فقط عند طلب المراجع أو المعلومات الحديثة، وتعرض المصادر الرسمية في الرد.</p></article><article className="rounded-xl border border-white/10 bg-black/10 p-4"><p className="text-sm font-semibold">حالة الجلسة</p><p className="mt-2 text-xs leading-5 text-muted-foreground">متصل باسم {user.name || "المالك"}. يمكنك إنهاء الجلسة من الشريط الجانبي أو هنا.</p><Button variant="ghost" size="sm" onClick={logout} className="mt-2 h-8 px-0 text-rose-200 hover:bg-transparent hover:text-rose-100"><LogOut className="ml-1.5 h-3.5 w-3.5" />تسجيل الخروج</Button></article></div></div></section>
 
-          <QualityInsightsPanel tasks={dashboard.data?.tasks ?? []} audit={dashboard.data?.audit ?? []} />
+          <Suspense fallback={<ControlPanelFallback />}><QualityInsightsPanel tasks={dashboard.data?.tasks ?? []} audit={dashboard.data?.audit ?? []} /></Suspense>
 
-          <TechnicalStudioPanel />
+          <Suspense fallback={<ControlPanelFallback />}><TechnicalStudioPanel /></Suspense>
 
-          <CyberOperationsPanel />
+          <Suspense fallback={<ControlPanelFallback />}><CyberOperationsPanel /></Suspense>
 
-          <ModelLabPanel />
+          <Suspense fallback={<ControlPanelFallback />}><ModelLabPanel /></Suspense>
 
-          <BenchmarkPanel />
+          <Suspense fallback={<ControlPanelFallback />}><BenchmarkPanel /></Suspense>
 
-          <KnowledgeControlPanel />
+          <Suspense fallback={<ControlPanelFallback />}><KnowledgeControlPanel /></Suspense>
 
           <section id="tasks" className="mt-7 grid scroll-mt-6 gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(300px,0.65fr)]">
             <div className="glass-panel overflow-hidden rounded-2xl"><div className="flex items-center justify-between border-b border-white/10 p-5"><div><p className="section-kicker">Task Console</p><h2 className="mt-1 text-lg font-bold">محادثة المهام</h2></div><Badge variant="outline" className="border-primary/20 text-primary"><Bot className="ml-1 h-3.5 w-3.5" />فحص قبل التنفيذ</Badge></div><div className="p-3"><AIChatBox messages={messages} onSendMessage={handleSend} isLoading={submitTask.isPending} height="430px" className="border-0 bg-transparent shadow-none" placeholder="صف المهمة التي تريد من Harb تحليلها أو تنظيمها…" emptyStateMessage="ابدأ بطلب واضح؛ سيعرض Harb القرار قبل أي عملية حساسة." suggestedPrompts={["لخّص الملفات الموجودة في مساحة العمل", "أنشئ خطة لمراجعة مشروع برمجي", "احذف الملف القديم من جهازي"]} /></div></div>
@@ -487,7 +494,7 @@ export default function Home() {
           </section>
 
           <section id="files" className="mt-7 grid scroll-mt-6 gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(310px,0.8fr)]">
-            <div className="glass-panel rounded-2xl p-5"><div><p className="section-kicker">Workspace</p><h2 className="mt-1 text-lg font-bold">مساحة الملفات والمشاريع</h2></div><p className="mt-2 text-xs text-muted-foreground">تُخزّن الملفات خاصةً افتراضياً، ويمكن للمالك إعادة تصنيفها. لا يعني التصنيف المشترك إرسال الملف تلقائياً؛ تبقى المشاركة خاضعة للقوانين والموافقة.</p><div className="mt-5"><WorkspaceBatchUpload /></div><div className="mt-5 space-y-2">{files.length ? files.map(file => <article key={file.id} className="flex flex-col gap-3 rounded-xl border border-white/8 bg-black/10 p-3 sm:flex-row sm:items-center"><a href={file.storageUrl} target="_blank" rel="noreferrer" className="flex min-w-0 flex-1 items-center gap-3 transition-colors hover:text-primary"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/5"><FileText className="h-4 w-4 text-primary" /></span><span className="min-w-0"><span className="block truncate text-sm font-medium">{file.name}</span><span className="mt-1 block text-xs text-muted-foreground">{file.mimeType} · {formatBytes(file.size)} · {formatDate(file.createdAt)}</span></span></a><div className="flex items-center gap-2 self-end sm:self-auto"><select aria-label={`تصنيف ${file.name}`} value={file.classification} onChange={event => updateFileClassification.mutate({ id: file.id, classification: event.target.value as "private" | "restricted" | "shared" })} className="h-8 rounded-md border border-white/15 bg-background px-2 text-xs"><option value="private">خاص</option><option value="restricted">مقيّد</option><option value="shared">مشترك</option></select><Badge variant="outline" className="border-white/10 text-[10px] text-muted-foreground">{classificationLabel(file.classification)}</Badge></div><p className="w-full text-[11px] text-muted-foreground sm:hidden">{file.classification === "private" ? "محمي داخل مساحة العمل" : file.classification === "restricted" ? "أي تعديل أو مشاركة يحتاج موافقة" : "لا يزال الإرسال الخارجي خاضعاً للقوانين"}</p></article>) : <div className="rounded-xl border border-dashed border-white/15 p-7 text-center"><FolderOpen className="mx-auto h-7 w-7 text-muted-foreground" /><p className="mt-3 text-sm font-medium">مساحة عمل فارغة</p><p className="mt-1 text-xs text-muted-foreground">ارفع دفعة ملفات لربطها بمهام Harb وسجل التدقيق.</p></div>}</div></div>
+            <div className="glass-panel rounded-2xl p-5"><div><p className="section-kicker">Workspace</p><h2 className="mt-1 text-lg font-bold">مساحة الملفات والمشاريع</h2></div><p className="mt-2 text-xs text-muted-foreground">تُخزّن الملفات خاصةً افتراضياً، ويمكن للمالك إعادة تصنيفها. لا يعني التصنيف المشترك إرسال الملف تلقائياً؛ تبقى المشاركة خاضعة للقوانين والموافقة.</p><div className="mt-5"><Suspense fallback={<div className="rounded-xl border border-dashed border-white/15 p-4 text-center text-xs text-muted-foreground">يُجهّز رافع الملفات…</div>}><WorkspaceBatchUpload /></Suspense></div><div className="mt-5 space-y-2">{files.length ? files.map(file => <article key={file.id} className="flex flex-col gap-3 rounded-xl border border-white/8 bg-black/10 p-3 sm:flex-row sm:items-center"><a href={file.storageUrl} target="_blank" rel="noreferrer" className="flex min-w-0 flex-1 items-center gap-3 transition-colors hover:text-primary"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/5"><FileText className="h-4 w-4 text-primary" /></span><span className="min-w-0"><span className="block truncate text-sm font-medium">{file.name}</span><span className="mt-1 block text-xs text-muted-foreground">{file.mimeType} · {formatBytes(file.size)} · {formatDate(file.createdAt)}</span></span></a><div className="flex items-center gap-2 self-end sm:self-auto"><select aria-label={`تصنيف ${file.name}`} value={file.classification} onChange={event => updateFileClassification.mutate({ id: file.id, classification: event.target.value as "private" | "restricted" | "shared" })} className="h-8 rounded-md border border-white/15 bg-background px-2 text-xs"><option value="private">خاص</option><option value="restricted">مقيّد</option><option value="shared">مشترك</option></select><Badge variant="outline" className="border-white/10 text-[10px] text-muted-foreground">{classificationLabel(file.classification)}</Badge></div><p className="w-full text-[11px] text-muted-foreground sm:hidden">{file.classification === "private" ? "محمي داخل مساحة العمل" : file.classification === "restricted" ? "أي تعديل أو مشاركة يحتاج موافقة" : "لا يزال الإرسال الخارجي خاضعاً للقوانين"}</p></article>) : <div className="rounded-xl border border-dashed border-white/15 p-7 text-center"><FolderOpen className="mx-auto h-7 w-7 text-muted-foreground" /><p className="mt-3 text-sm font-medium">مساحة عمل فارغة</p><p className="mt-1 text-xs text-muted-foreground">ارفع دفعة ملفات لربطها بمهام Harb وسجل التدقيق.</p></div>}</div></div>
             <div className="glass-panel rounded-2xl p-5"><div className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-300/10 text-amber-200"><LockKeyhole className="h-5 w-5" /></span><div><p className="section-kicker text-amber-200">Consent Queue</p><h2 className="mt-1 text-lg font-bold">موافقات صريحة</h2></div></div><div className="mt-5 space-y-3">{approvals.filter(item => item.status === "requested").length ? approvals.filter(item => item.status === "requested").map(item => <article key={item.id} className="rounded-xl border border-amber-200/15 bg-amber-300/5 p-3"><p className="text-sm font-medium leading-6">{item.summary}</p><p className="mt-2 text-xs text-muted-foreground">نوع العملية: {scopeLabels[item.action as RuleScope] || item.action} · تنتهي {formatDate(item.expiresAt)}</p><div className="mt-3 flex gap-2"><Button size="sm" onClick={() => resolveApproval.mutate({ id: item.id, status: "approved" })} className="h-8 bg-primary text-primary-foreground"><CheckCircle2 className="ml-1 h-3.5 w-3.5" />موافقة</Button><Button size="sm" variant="outline" onClick={() => resolveApproval.mutate({ id: item.id, status: "rejected" })} className="h-8 border-rose-200/20 text-rose-200 hover:bg-rose-400/10">رفض</Button></div></article>) : <div className="rounded-xl border border-dashed border-white/15 p-5 text-center"><ShieldCheck className="mx-auto h-6 w-6 text-primary" /><p className="mt-2 text-sm font-medium">لا توجد موافقات معلقة</p><p className="mt-1 text-xs text-muted-foreground">تظهر هنا العمليات الحساسة فقط.</p></div>}</div></div>
           </section>
 
