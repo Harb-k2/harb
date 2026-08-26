@@ -5,6 +5,7 @@ import { CyberOperationsPanel } from "@/components/CyberOperationsPanel";
 import { ModelLabPanel } from "@/components/ModelLabPanel";
 import { BenchmarkPanel } from "@/components/BenchmarkPanel";
 import { KnowledgeControlPanel } from "@/components/KnowledgeControlPanel";
+import { TechnicalStudioPanel } from "@/components/TechnicalStudioPanel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -39,6 +40,7 @@ import {
   ShieldAlert,
   ShieldCheck,
   TerminalSquare,
+  WandSparkles,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -226,7 +228,7 @@ export default function Home() {
   const { user, loading, isAuthenticated, logout } = useAuth();
   const utils = trpc.useUtils();
   const [messages, setMessages] = useState<Message[]>([]);
-  const [workspace, setWorkspace] = useState<"assistant" | "control">("assistant");
+  const [workspace, setWorkspace] = useState<"assistant" | "control">(() => window.location.hash ? "control" : "assistant");
   const [responseMode, setResponseMode] = useState<ResponseMode>("balanced");
   const [activeConversationId, setActiveConversationId] = useState<string | undefined>();
   const [pendingAttachments, setPendingAttachments] = useState<ChatAttachment[]>([]);
@@ -256,6 +258,12 @@ export default function Home() {
     });
     setMessages(activeConversation.data.messages.map(message => ({ id: message.id, role: message.role, content: message.content, attachments: attachmentsByMessage.get(message.id) })));
   }, [activeConversation.data]);
+
+  useEffect(() => {
+    if (workspace !== "control" || !window.location.hash) return;
+    const timer = window.setTimeout(() => document.getElementById(window.location.hash.slice(1))?.scrollIntoView({ block: "start" }), 80);
+    return () => window.clearTimeout(timer);
+  }, [workspace]);
 
   const submitTask = trpc.harb.tasks.submit.useMutation({
     onSuccess: result => {
@@ -410,6 +418,11 @@ export default function Home() {
   const activeRules = rules.filter(rule => rule.isActive).length;
   const pendingApprovals = approvals.filter(item => item.status === "requested").length;
   const feedbackByMessage = Object.fromEntries((activeConversation.data?.feedback ?? []).map(item => [item.messageId, item.rating])) as Record<string, "up" | "down">;
+  const openControlSection = (sectionId: string) => {
+    window.location.hash = sectionId;
+    setWorkspace("control");
+    window.setTimeout(() => document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
+  };
 
   if (workspace === "assistant") {
     return <HarbAssistantWorkspace
@@ -424,6 +437,8 @@ export default function Home() {
       onResponseModeChange={setResponseMode}
       onNewConversation={() => createConversation.mutate({ title: "محادثة جديدة" })}
       onOpenControlCenter={() => setWorkspace("control")}
+      onOpenTechnicalStudio={() => openControlSection("studio")}
+      onOpenWebSearch={() => openControlSection("studio")}
       conversations={conversations.data ?? []}
       activeConversationId={activeConversationId}
       feedbackByMessage={feedbackByMessage}
@@ -446,9 +461,9 @@ export default function Home() {
     <div className="harb-shell harb-control-shell min-h-screen" dir="rtl">
       <div className="harb-control-layout mx-auto grid min-h-screen max-w-[1600px] grid-cols-1 lg:grid-cols-[270px_minmax(0,1fr)]">
         <aside className="harb-control-sidebar border-b border-white/10 bg-[#101924]/70 p-5 backdrop-blur-xl lg:border-b-0 lg:border-l">
-          <div className="flex items-center gap-3 px-2"><div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-lg font-black text-primary-foreground">ح</div><div><p className="font-bold tracking-tight">Harb</p><p className="text-xs text-muted-foreground">مركز السيطرة</p></div></div>
+          <div className="flex items-center gap-3 px-2"><img src="/manus-storage/harb-logo-mark_281c074b.png" alt="Harb" className="h-10 w-10 rounded-xl object-cover shadow-[0_10px_24px_oklch(0.79_0.144_169_/_16%)]" /><div><p className="font-bold tracking-tight">Harb</p><p className="text-xs text-muted-foreground">مركز السيطرة</p></div></div>
           <nav className="mt-9 grid gap-1 text-sm">
-            {[{ href: "#overview", label: "نظرة عامة", icon: Activity }, { href: "#cyber", label: "العمليات السيبرانية", icon: ShieldCheck }, { href: "#lab", label: "مختبر النموذج", icon: Beaker }, { href: "#tasks", label: "محادثة المهام", icon: MessageSquare }, { href: "#files", label: "مساحة الملفات", icon: FolderOpen }, { href: "#rules", label: "قوانين المالك", icon: Gavel }, { href: "#audit", label: "سجل التدقيق", icon: ScanLine }, { href: "#desktop", label: "عميل سطح المكتب", icon: Laptop }].map(item => <a key={item.href} href={item.href} className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground"><item.icon className="h-4 w-4" />{item.label}</a>)}
+            {[{ href: "#overview", label: "نظرة عامة", icon: Activity }, { href: "#studio", label: "الاستوديو التقني", icon: WandSparkles }, { href: "#cyber", label: "العمليات السيبرانية", icon: ShieldCheck }, { href: "#lab", label: "مختبر النموذج", icon: Beaker }, { href: "#tasks", label: "محادثة المهام", icon: MessageSquare }, { href: "#files", label: "مساحة الملفات", icon: FolderOpen }, { href: "#rules", label: "قوانين المالك", icon: Gavel }, { href: "#audit", label: "سجل التدقيق", icon: ScanLine }, { href: "#desktop", label: "عميل سطح المكتب", icon: Laptop }].map(item => <a key={item.href} href={item.href} className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground"><item.icon className="h-4 w-4" />{item.label}</a>)}
           </nav>
           <div className="mt-9 rounded-2xl border border-primary/15 bg-primary/5 p-4"><div className="flex items-center gap-2 text-sm font-semibold text-primary"><ShieldCheck className="h-4 w-4" />حماية Harb مفعّلة</div><p className="mt-2 text-xs leading-5 text-muted-foreground">لا تُرسل العمليات الحساسة إلى الأجهزة المتصلة دون تقييم قانوني وموافقة عند اللزوم.</p></div>
           <div className="mt-6 flex items-center gap-3 border-t border-white/10 pt-5"><div className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-sm font-bold">{user.name?.slice(0, 1) || "م"}</div><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{user.name || "المالك"}</p><p className="truncate text-xs text-muted-foreground">مالك النظام</p></div><button onClick={logout} aria-label="تسجيل الخروج" className="rounded-lg p-2 text-muted-foreground hover:bg-white/5 hover:text-foreground"><LogOut className="h-4 w-4" /></button></div>
@@ -458,6 +473,8 @@ export default function Home() {
           <header className="harb-control-header mb-7 flex flex-col gap-4 border-b border-white/10 pb-6 sm:flex-row sm:items-center sm:justify-between"><div><p className="section-kicker">Harb / Operations</p><h1 className="mt-1 text-2xl font-bold tracking-tight sm:text-3xl">أهلاً بك، {user.name || "المالك"}</h1><p className="mt-1 text-sm text-muted-foreground">قرارات قابلة للتفسير قبل التنفيذ، وسجل موثوق بعده.</p></div><div className="flex flex-wrap items-center gap-2 self-start"><Button variant="outline" onClick={() => setWorkspace("assistant")} className="rounded-full border-white/15 bg-white/5 text-xs"><MessageSquare className="ml-1.5 h-4 w-4" />فتح المحادثة</Button><div className="flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-primary"><span className="status-dot" />Harb Core متصل <span className="text-primary/60">•</span> وضع محمي</div></div></header>
 
           <section id="overview" className="scroll-mt-6"><div className="mb-4 flex items-center justify-between"><div><p className="section-kicker">الحالة التشغيلية</p><h2 className="mt-1 text-xl font-bold">نظرة عامة</h2></div><Badge variant="outline" className="border-primary/20 bg-primary/5 text-primary">آخر مزامنة الآن</Badge></div><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><Metric label="قوانين فعالة" value={activeRules} hint="تُفحص حسب الأولوية" icon={Gavel} /><Metric label="مهام مسجلة" value={tasks.length} hint="تشمل القرارات والنتائج" icon={Activity} /><Metric label="موافقات معلقة" value={pendingApprovals} hint="لن تنفذ قبل القرار" icon={KeyRound} /><Metric label="ملفات خاصة" value={files.length} hint="محفوظة مع بياناتها الوصفية" icon={FolderOpen} /></div></section>
+
+          <TechnicalStudioPanel />
 
           <CyberOperationsPanel />
 
